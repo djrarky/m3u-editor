@@ -2,18 +2,11 @@
 
 namespace App\Listeners;
 
-use Throwable;
 use App\Enums\Status;
 use App\Events\SyncCompleted;
 use App\Jobs\GenerateEpgCache;
-use App\Jobs\MapPlaylistChannelsToEpg;
 use App\Jobs\RunPostProcess;
 use App\Models\Epg;
-use App\Models\EpgMap;
-use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\Bus;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Queue\InteractsWithQueue;
 
 class SyncListener
 {
@@ -35,14 +28,21 @@ class SyncListener
                 ));
             });
 
-            if (!$event->model->parent_id && $event->model->children()->exists()) {
-                $event->model->children()->update([
-                    'status' => Status::Pending,
-                    'processing' => false,
-                ]);
-                dispatch(new \App\Jobs\SyncPlaylistChildren($event->model));
-            } elseif ($event->model->parent_id && ! $event->model->parent->processing) {
-                dispatch(new \App\Jobs\SyncPlaylistChildren($event->model->parent));
+            if ($event->model->status === Status::Completed) {
+                if (! $event->model->parent_id && $event->model->children()->exists()) {
+                    $event->model->children()->update([
+                        'status' => Status::Pending,
+                        'processing' => false,
+                    ]);
+
+                    dispatch(new \App\Jobs\SyncPlaylistChildren($event->model));
+                } elseif (
+                    $event->model->parent_id &&
+                    ! $event->model->parent->processing &&
+                    $event->model->parent->status === Status::Completed
+                ) {
+                    dispatch(new \App\Jobs\SyncPlaylistChildren($event->model->parent));
+                }
             }
         }
         if ($event->model instanceof \App\Models\Epg) {
