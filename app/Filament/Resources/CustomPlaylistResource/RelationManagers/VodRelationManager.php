@@ -229,7 +229,7 @@ class VodRelationManager extends RelationManager
                 ...VodResource::getTableActions(),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
-                ...VodResource::getTableBulkActions(addToCustom: false),
+                ...$this->getBulkActionsWithParentPlaylist($ownerRecord),
                 Tables\Actions\DetachBulkAction::make()->color('danger'),
                 Tables\Actions\BulkAction::make('add_to_group')
                     ->label('Add to custom group')
@@ -258,8 +258,60 @@ class VodRelationManager extends RelationManager
                     ->icon('heroicon-o-squares-plus')
                     ->modalIcon('heroicon-o-squares-plus')
                     ->modalDescription('Add to group')
-            ->modalSubmitActionLabel('Yes, add to group'),
+                    ->modalSubmitActionLabel('Yes, add to group'),
             ]);
+    }
+
+    protected function getBulkActionsWithParentPlaylist($ownerRecord): array
+    {
+        $bulkActions = VodResource::getTableBulkActions(addToCustom: false);
+        $bulkActions[0]->actions([
+            ...$bulkActions[0]->getActions(),
+            Tables\Actions\BulkAction::make('change_parent_playlist')
+                ->label('Change parent playlist')
+                ->form(function (Collection $records) use ($ownerRecord): array {
+                    [$groups] = self::getSourcePlaylistData($records, 'channels', 'source_id');
+
+                    $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
+                        $ownerRecord->id,
+                        $group,
+                        'channels',
+                        'source_id',
+                    ));
+
+                    return [
+                        Forms\Components\Select::make('playlist')
+                            ->label('Parent Playlist')
+                            ->options($playlists->unique()->toArray())
+                            ->required(),
+                    ];
+                })
+                ->action(function (Collection $records, array $data): void {
+                    foreach ($records as $record) {
+                        $exists = Channel::where('playlist_id', (int) $data['playlist'])
+                            ->where('source_id', $record->source_id)
+                            ->exists();
+
+                        if ($exists) {
+                            $this->changeSourcePlaylist($record, (int) $data['playlist']);
+                        }
+                    }
+                })->after(function () {
+                    FilamentNotification::make()
+                        ->success()
+                        ->title('Parent playlist updated')
+                        ->body('The parent playlist has been updated where applicable.')
+                        ->send();
+                })
+                ->deselectRecordsAfterCompletion()
+                ->requiresConfirmation()
+                ->icon('heroicon-o-arrows-right-left')
+                ->modalIcon('heroicon-o-arrows-right-left')
+                ->modalDescription('Change the parent playlist for the selected VOD.')
+                ->modalSubmitActionLabel('Yes, change parent playlist'),
+        ]);
+
+        return $bulkActions;
     }
 
     protected function playlistOptions(Channel $record): array
