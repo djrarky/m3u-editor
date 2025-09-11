@@ -1,6 +1,8 @@
 <?php
 
 use App\Models\{User, Playlist, Channel, Series, CustomPlaylist};
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 
 it('changes parent playlist for selected channels', function () {
     $user = User::factory()->create();
@@ -60,4 +62,55 @@ it('changes parent playlist for selected series', function () {
 
     expect($custom->series()->whereKey($replacement->id)->exists())->toBeTrue();
     expect($custom->series()->whereKey($seriesA->id)->exists())->toBeFalse();
+});
+
+it('lists parent playlist when both parent and child items selected', function () {
+    $user = User::factory()->create();
+    Auth::login($user);
+    $parent = Playlist::factory()->for($user)->create();
+    $child = Playlist::factory()->for($user)->create(['parent_id' => $parent->id]);
+
+    $custom = CustomPlaylist::factory()->for($user)->create();
+
+    Channel::withoutEvents(function () use ($user, $parent, $child, $custom, &$parentChannel, &$childChannel) {
+        $parentChannel = Channel::factory()->for($user)->for($parent)->create(['source_id' => 5]);
+        $childChannel = Channel::factory()->for($user)->for($child)->create(['source_id' => 5]);
+        $custom->channels()->attach([$parentChannel->id, $childChannel->id]);
+    });
+
+    $helper = new class {
+        use \App\Filament\BulkActions\HandlesSourcePlaylist;
+
+        public static function options(int $playlistId, \Illuminate\Support\Collection $records)
+        {
+            [$groups] = self::getSourcePlaylistData($records, 'channels', 'source_id');
+            $group = $groups->first();
+
+            return self::availablePlaylistsForGroup($playlistId, $group, 'channels', 'source_id', false);
+        }
+    };
+
+    $options = $helper::options($custom->id, new EloquentCollection([$parentChannel, $childChannel]));
+
+    expect($options->keys())->toContain($parent->id);
+
+    foreach ([$parentChannel, $childChannel] as $record) {
+        $exists = Channel::where('playlist_id', $parent->id)
+            ->where('source_id', $record->source_id)
+            ->exists();
+
+        if ($exists && $record->playlist_id !== $parent->id) {
+            $replacement = Channel::where('playlist_id', $parent->id)
+                ->where('source_id', $record->source_id)
+                ->first();
+
+            Channel::withoutEvents(function () use ($custom, $record, $replacement) {
+                $custom->channels()->detach($record->id);
+                $custom->channels()->attach($replacement->id);
+            });
+        }
+    }
+
+    expect($custom->channels()->whereKey($childChannel->id)->exists())->toBeFalse();
+    expect($custom->channels()->whereKey($parentChannel->id)->exists())->toBeTrue();
 });
