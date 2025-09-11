@@ -134,7 +134,7 @@ trait HandlesSourcePlaylist
      * Determine which playlists remain available for a duplicate group,
      * excluding any already used within the chosen custom playlist.
      */
-    protected static function availablePlaylistsForGroup(?int $customPlaylistId, array $group, string $relation, string $sourceKey): Collection
+    protected static function availablePlaylistsForGroup(?int $customPlaylistId, array $group, string $relation, string $sourceKey, bool $excludeUsed = true): Collection
     {
         $options = $group['playlists']->collect();
 
@@ -145,6 +145,10 @@ trait HandlesSourcePlaylist
         $playlist = CustomPlaylist::find($customPlaylistId);
 
         if (! $playlist) {
+            return $options;
+        }
+
+        if (! $excludeUsed) {
             return $options;
         }
 
@@ -236,12 +240,12 @@ trait HandlesSourcePlaylist
                                     $existing = $get("source_playlist_items.{$groupKey}") ?? [];
                                     $default = $get("source_playlists.{$groupKey}");
 
-                                    return collect($group['source_ids'])->map(function ($sourceId) use ($group, $existing, $default, $relation, $sourceKey, $labels) {
+                                    return collect($group['source_ids'])->map(function ($sourceId) use ($group, $existing, $default, $relation, $sourceKey, $labels, $get) {
                                         return Forms\Components\Grid::make(2)
                                             ->schema([
                                                 Forms\Components\Select::make("items.{$sourceId}")
                                                     ->label($labels[$sourceId] ?? (string) $sourceId)
-                                                    ->options(fn (Get $get) => self::availablePlaylistsForGroup(
+                                                    ->options(fn () => self::availablePlaylistsForGroup(
                                                         $get('playlist'),
                                                         $group,
                                                         $relation,

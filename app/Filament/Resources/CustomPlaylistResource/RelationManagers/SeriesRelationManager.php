@@ -304,7 +304,7 @@ class SeriesRelationManager extends RelationManager
         }
 
         $group = $groups->first();
-        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'series', 'source_series_id');
+        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'series', 'source_series_id', false);
 
         return $options->put($record->playlist_id, $record->playlist?->name)->toArray();
     }

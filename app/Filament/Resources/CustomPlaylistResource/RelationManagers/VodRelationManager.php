@@ -332,7 +332,7 @@ class VodRelationManager extends RelationManager
         }
 
         $group = $groups->first();
-        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id');
+        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false);
 
         return $options->put($record->playlist_id, $record->playlist?->name)->toArray();
     }
