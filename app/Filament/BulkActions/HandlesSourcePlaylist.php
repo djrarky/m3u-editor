@@ -134,7 +134,7 @@ trait HandlesSourcePlaylist
      * Determine which playlists remain available for a duplicate group,
      * excluding any already used within the chosen custom playlist.
      */
-    protected static function availablePlaylistsForGroup(?int $customPlaylistId, array $group, string $relation, string $sourceKey): Collection
+    protected static function availablePlaylistsForGroup(?int $customPlaylistId, array $group, string $relation, string $sourceKey, bool $excludeUsed = true): Collection
     {
         $options = $group['playlists']->collect();
 
@@ -145,6 +145,10 @@ trait HandlesSourcePlaylist
         $playlist = CustomPlaylist::find($customPlaylistId);
 
         if (! $playlist) {
+            return $options;
+        }
+
+        if (! $excludeUsed) {
             return $options;
         }
 

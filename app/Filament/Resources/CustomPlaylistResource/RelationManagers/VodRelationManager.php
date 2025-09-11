@@ -261,20 +261,26 @@ class VodRelationManager extends RelationManager
                     ->modalSubmitActionLabel('Yes, add to group'),
                 Tables\Actions\BulkAction::make('change_parent_playlist')
                     ->label('Change parent playlist')
-                    ->form(function (Collection $records) use ($ownerRecord): array {
+                    ->form(function (Collection $records): array {
+                        $playlists = [];
+
+                        foreach ($records as $record) {
+                            $playlists[$record->playlist_id] = $record->playlist?->name;
+                        }
+
                         [$groups] = self::getSourcePlaylistData($records, 'channels', 'source_id');
 
-                        $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
-                            $ownerRecord->id,
-                            $group,
-                            'channels',
-                            'source_id',
-                        ));
+                        foreach ($groups as $group) {
+                            $playlists = array_replace(
+                                $playlists,
+                                self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false)->toArray()
+                            );
+                        }
 
                         return [
                             Forms\Components\Select::make('playlist')
                                 ->label('Parent Playlist')
-                                ->options($playlists->unique()->toArray())
+                                ->options($playlists)
                                 ->required(),
                         ];
                     })
@@ -313,7 +319,7 @@ class VodRelationManager extends RelationManager
         }
 
         $group = $groups->first();
-        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id');
+        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false);
 
         return $options->put($record->playlist_id, $record->playlist?->name)->toArray();
     }
