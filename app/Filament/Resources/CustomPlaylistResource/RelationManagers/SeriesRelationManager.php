@@ -211,11 +211,11 @@ class SeriesRelationManager extends RelationManager
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
                 ...$this->getBulkActionsWithParentPlaylist($ownerRecord),
-                Tables\Actions\DetachBulkAction::make()->color('danger'),
-                Tables\Actions\BulkAction::make('add_to_category')
-                    ->label('Add to custom category')
-                    ->form([
-                        Forms\Components\Select::make('category')
+                  Tables\Actions\DetachBulkAction::make()->color('danger'),
+                  Tables\Actions\BulkAction::make('add_to_category')
+                      ->label('Add to custom category')
+                      ->form([
+                          Forms\Components\Select::make('category')
                             ->label('Select category')
                             ->options(
                                 Tag::where('type', $ownerRecord->uuid.'-category')
@@ -236,35 +236,13 @@ class SeriesRelationManager extends RelationManager
                     })
                     ->deselectRecordsAfterCompletion()
                     ->requiresConfirmation()
-                    ->icon('heroicon-o-squares-plus')
-                    ->modalIcon('heroicon-o-squares-plus')
-                    ->modalDescription('Add to category')
-                    ->modalSubmitActionLabel('Yes, add to category'),
-                Tables\Actions\BulkAction::make('change_parent_playlist')
-                    ->label('Change parent playlist')
-                    ->form(function (Collection $records) use ($ownerRecord): array {
-                        [$groups] = self::getSourcePlaylistData($records, 'series', 'source_series_id');
+                      ->icon('heroicon-o-squares-plus')
+                      ->modalIcon('heroicon-o-squares-plus')
+                      ->modalDescription('Add to category')
+                      ->modalSubmitActionLabel('Yes, add to category'),
+              ]);
 
-                        $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
-                            $ownerRecord->id,
-                            $group,
-                            'series',
-                            'source_series_id',
-                            false,
-                        ));
-
-                        return [
-                            Forms\Components\Select::make('playlist')
-                                ->label('Parent Playlist')
-                                ->options($playlists->unique()->toArray())
-                                ->required(),
-                        ];
-                    })
-                    ->action(function (Collection $records, array $data): void {
-                        foreach ($records as $record) {
-                            $exists = Series::where('playlist_id', (int) $data['playlist'])
-                                ->where('source_series_id', $record->source_series_id)
-                                ->exists();
+    }
 
     protected function getBulkActionsWithParentPlaylist($ownerRecord): array
     {
