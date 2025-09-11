@@ -210,7 +210,7 @@ class SeriesRelationManager extends RelationManager
                 ...SeriesResource::getTableActions(),
             ], position: Tables\Enums\ActionsPosition::BeforeCells)
             ->bulkActions([
-                ...SeriesResource::getTableBulkActions(addToCustom: false),
+                ...$this->getBulkActionsWithParentPlaylist($ownerRecord),
                 Tables\Actions\DetachBulkAction::make()->color('danger'),
                 Tables\Actions\BulkAction::make('add_to_category')
                     ->label('Add to custom category')
@@ -266,24 +266,56 @@ class SeriesRelationManager extends RelationManager
                                 ->where('source_series_id', $record->source_series_id)
                                 ->exists();
 
-                            if ($exists) {
-                                $this->changeSourcePlaylist($record, (int) $data['playlist']);
-                            }
+    protected function getBulkActionsWithParentPlaylist($ownerRecord): array
+    {
+        $bulkActions = SeriesResource::getTableBulkActions(addToCustom: false);
+        $bulkActions[0]->actions([
+            ...$bulkActions[0]->getActions(),
+            Tables\Actions\BulkAction::make('change_parent_playlist')
+                ->label('Change parent playlist')
+                ->form(function (Collection $records) use ($ownerRecord): array {
+                    [$groups] = self::getSourcePlaylistData($records, 'series', 'source_series_id');
+
+                    $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
+                        $ownerRecord->id,
+                        $group,
+                        'series',
+                        'source_series_id',
+                    ));
+
+                    return [
+                        Forms\Components\Select::make('playlist')
+                            ->label('Parent Playlist')
+                            ->options($playlists->unique()->toArray())
+                            ->required(),
+                    ];
+                })
+                ->action(function (Collection $records, array $data): void {
+                    foreach ($records as $record) {
+                        $exists = Series::where('playlist_id', (int) $data['playlist'])
+                            ->where('source_series_id', $record->source_series_id)
+                            ->exists();
+
+                        if ($exists) {
+                            $this->changeSourcePlaylist($record, (int) $data['playlist']);
                         }
-                    })->after(function () {
-                        FilamentNotification::make()
-                            ->success()
-                            ->title('Parent playlist updated')
-                            ->body('The parent playlist has been updated where applicable.')
-                            ->send();
-                    })
-                    ->deselectRecordsAfterCompletion()
-                    ->requiresConfirmation()
-                    ->icon('heroicon-o-arrows-right-left')
-                    ->modalIcon('heroicon-o-arrows-right-left')
-                    ->modalDescription('Change the parent playlist for the selected series.')
-                    ->modalSubmitActionLabel('Yes, change parent playlist'),
-            ]);
+                    }
+                })->after(function () {
+                    FilamentNotification::make()
+                        ->success()
+                        ->title('Parent playlist updated')
+                        ->body('The parent playlist has been updated where applicable.')
+                        ->send();
+                })
+                ->deselectRecordsAfterCompletion()
+                ->requiresConfirmation()
+                ->icon('heroicon-o-arrows-right-left')
+                ->modalIcon('heroicon-o-arrows-right-left')
+                ->modalDescription('Change the parent playlist for the selected series.')
+                ->modalSubmitActionLabel('Yes, change parent playlist'),
+        ]);
+
+        return $bulkActions;
     }
 
     protected function playlistOptions(Series $record): array
