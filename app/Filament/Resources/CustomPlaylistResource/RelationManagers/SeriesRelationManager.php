@@ -240,8 +240,31 @@ class SeriesRelationManager extends RelationManager
                     ->modalIcon('heroicon-o-squares-plus')
                     ->modalDescription('Add to category')
                     ->modalSubmitActionLabel('Yes, add to category'),
-            ]);
-    }
+                Tables\Actions\BulkAction::make('change_parent_playlist')
+                    ->label('Change parent playlist')
+                    ->form(function (Collection $records) use ($ownerRecord): array {
+                        [$groups] = self::getSourcePlaylistData($records, 'series', 'source_series_id');
+
+                        $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
+                            $ownerRecord->id,
+                            $group,
+                            'series',
+                            'source_series_id',
+                            false,
+                        ));
+
+                        return [
+                            Forms\Components\Select::make('playlist')
+                                ->label('Parent Playlist')
+                                ->options($playlists->unique()->toArray())
+                                ->required(),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        foreach ($records as $record) {
+                            $exists = Series::where('playlist_id', (int) $data['playlist'])
+                                ->where('source_series_id', $record->source_series_id)
+                                ->exists();
 
     protected function getBulkActionsWithParentPlaylist($ownerRecord): array
     {
@@ -304,7 +327,7 @@ class SeriesRelationManager extends RelationManager
         }
 
         $group = $groups->first();
-        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'series', 'source_series_id');
+        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'series', 'source_series_id', false);
 
         return $options->put($record->playlist_id, $record->playlist?->name)->toArray();
     }
