@@ -270,19 +270,16 @@ class ChannelsRelationManager extends RelationManager
                 Tables\Actions\BulkAction::make('change_parent_playlist')
                     ->label('Change parent playlist')
                     ->form(function (Collection $records) use ($ownerRecord): array {
-                        [$groups] = self::getSourcePlaylistData($records, 'channels', 'source_id');
+                        $playlists = [];
 
-                        $playlists = $groups->flatMap(fn ($group) => self::availablePlaylistsForGroup(
-                            $ownerRecord->id,
-                            $group,
-                            'channels',
-                            'source_id',
-                        ));
+                        foreach ($records as $record) {
+                            $playlists = array_replace($playlists, $this->playlistOptions($record));
+                        }
 
                         return [
                             Forms\Components\Select::make('playlist')
                                 ->label('Parent Playlist')
-                                ->options($playlists->unique()->toArray())
+                                ->options($playlists)
                                 ->required(),
                         ];
                     })
@@ -321,7 +318,7 @@ class ChannelsRelationManager extends RelationManager
         }
 
         $group = $groups->first();
-        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id');
+        $options = self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false);
 
         return $options->put($record->playlist_id, $record->playlist?->name)->toArray();
     }
