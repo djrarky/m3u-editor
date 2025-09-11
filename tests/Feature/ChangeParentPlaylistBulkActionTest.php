@@ -78,19 +78,39 @@ it('lists parent playlist when both parent and child items selected', function (
         $custom->channels()->attach([$parentChannel->id, $childChannel->id]);
     });
 
-    $helper = new class {
+    $manager = new class($custom) {
         use \App\Filament\BulkActions\HandlesSourcePlaylist;
 
-        public static function options(int $playlistId, \Illuminate\Support\Collection $records)
+        public function __construct(public CustomPlaylist $ownerRecord) {}
+
+        public function playlistOptions(Channel $record): array
         {
-            [$groups] = self::getSourcePlaylistData($records, 'channels', 'source_id');
+            [$groups] = self::getSourcePlaylistData(collect([$record]), 'channels', 'source_id');
+
+            if ($groups->isEmpty()) {
+                return [$record->playlist_id => $record->playlist?->name];
+            }
+
             $group = $groups->first();
 
-            return self::availablePlaylistsForGroup($playlistId, $group, 'channels', 'source_id', false);
+            return self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false)
+                ->put($record->playlist_id, $record->playlist?->name)
+                ->toArray();
+        }
+
+        public function bulkOptions(EloquentCollection $records): array
+        {
+            $playlists = [];
+
+            foreach ($records as $record) {
+                $playlists = array_replace($playlists, $this->playlistOptions($record));
+            }
+
+            return $playlists;
         }
     };
 
-    $options = $helper::options($custom->id, new EloquentCollection([$parentChannel, $childChannel]));
+    $options = collect($manager->bulkOptions(new EloquentCollection([$parentChannel, $childChannel])));
 
     expect($options->keys())->toContain($parent->id);
 
@@ -113,4 +133,56 @@ it('lists parent playlist when both parent and child items selected', function (
 
     expect($custom->channels()->whereKey($childChannel->id)->exists())->toBeFalse();
     expect($custom->channels()->whereKey($parentChannel->id)->exists())->toBeTrue();
+});
+
+it('lists selected parent playlists even without duplicates', function () {
+    $user = User::factory()->create();
+    Auth::login($user);
+    $playlistA = Playlist::factory()->for($user)->create();
+    $playlistB = Playlist::factory()->for($user)->create();
+
+    $custom = CustomPlaylist::factory()->for($user)->create();
+
+    Channel::withoutEvents(function () use ($user, $playlistA, $playlistB, $custom, &$channelA, &$channelB) {
+        $channelA = Channel::factory()->for($user)->for($playlistA)->create(['source_id' => 6]);
+        $channelB = Channel::factory()->for($user)->for($playlistB)->create(['source_id' => 7]);
+        $custom->channels()->attach([$channelA->id, $channelB->id]);
+    });
+
+    $manager = new class($custom) {
+        use \App\Filament\BulkActions\HandlesSourcePlaylist;
+
+        public function __construct(public CustomPlaylist $ownerRecord) {}
+
+        public function playlistOptions(Channel $record): array
+        {
+            [$groups] = self::getSourcePlaylistData(collect([$record]), 'channels', 'source_id');
+
+            if ($groups->isEmpty()) {
+                return [$record->playlist_id => $record->playlist?->name];
+            }
+
+            $group = $groups->first();
+
+            return self::availablePlaylistsForGroup($this->ownerRecord->id, $group, 'channels', 'source_id', false)
+                ->put($record->playlist_id, $record->playlist?->name)
+                ->toArray();
+        }
+
+        public function bulkOptions(EloquentCollection $records): array
+        {
+            $playlists = [];
+
+            foreach ($records as $record) {
+                $playlists = array_replace($playlists, $this->playlistOptions($record));
+            }
+
+            return $playlists;
+        }
+    };
+
+    $options = collect($manager->bulkOptions(new EloquentCollection([$channelA, $channelB])));
+
+    expect($options->keys())->toContain($playlistA->id);
+    expect($options->keys())->toContain($playlistB->id);
 });

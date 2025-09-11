@@ -236,11 +236,31 @@ class SeriesRelationManager extends RelationManager
                     })
                     ->deselectRecordsAfterCompletion()
                     ->requiresConfirmation()
-                      ->icon('heroicon-o-squares-plus')
-                      ->modalIcon('heroicon-o-squares-plus')
-                      ->modalDescription('Add to category')
-                      ->modalSubmitActionLabel('Yes, add to category'),
-              ]);
+                    ->icon('heroicon-o-squares-plus')
+                    ->modalIcon('heroicon-o-squares-plus')
+                    ->modalDescription('Add to category')
+                    ->modalSubmitActionLabel('Yes, add to category'),
+                Tables\Actions\BulkAction::make('change_parent_playlist')
+                    ->label('Change parent playlist')
+                    ->form(function (Collection $records) use ($ownerRecord): array {
+                        $playlists = [];
+
+                        foreach ($records as $record) {
+                            $playlists = array_replace($playlists, $this->playlistOptions($record));
+                        }
+
+                        return [
+                            Forms\Components\Select::make('playlist')
+                                ->label('Parent Playlist')
+                                ->options($playlists)
+                                ->required(),
+                        ];
+                    })
+                    ->action(function (Collection $records, array $data): void {
+                        foreach ($records as $record) {
+                            $exists = Series::where('playlist_id', (int) $data['playlist'])
+                                ->where('source_series_id', $record->source_series_id)
+                                ->exists();
 
     }
 
