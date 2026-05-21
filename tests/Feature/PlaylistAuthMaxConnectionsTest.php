@@ -18,7 +18,6 @@ use App\Models\User;
 use App\Services\M3uProxyService;
 use App\Settings\GeneralSettings;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Mockery;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Symfony\Component\HttpKernel\Exception\HttpException;

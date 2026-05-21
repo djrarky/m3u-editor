@@ -212,7 +212,7 @@ class PlaylistAuthResource extends Resource implements CopilotResource
                             'heroicon-m-question-mark-circle',
                             tooltip: __('Leave unchecked to use the global setting. Only applies when the assigned playlist has the proxy enabled.')
                         )
-                        ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, the new stream is blocked.'))
+                        ->helperText(__('When at max connections, stop the oldest stream to allow the new one. When off, use the global setting.'))
                         ->nullable()
                         ->columnSpan(1),
                     Select::make('assigned_playlist')
