@@ -6,6 +6,7 @@ use App\Models\Plugin;
 use App\Models\PluginTableRecord;
 use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -80,7 +81,7 @@ class PluginUiTableRegistry
 
         return $query
             ->orderBy($labelColumn)
-            ->limit((int) ($lookup['limit'] ?? 500))
+            ->limit(min((int) ($lookup['limit'] ?? 500), 500))
             ->pluck($labelColumn, $keyColumn)
             ->mapWithKeys(fn (mixed $label, mixed $value): array => [(string) $value => (string) $label])
             ->all();
@@ -96,6 +97,7 @@ class PluginUiTableRegistry
         }
 
         $targetTable = (string) ($definition['table'] ?? '');
+        // allowHostTable: trusted plugins may read from host tables (e.g. playlists) as a prefill source.
         $sourceTable = $this->tableNameFor($plugin, (string) ($source['table'] ?? ''), allowHostTable: true);
         $sourceKey = (string) ($source['key_column'] ?? 'id');
         $targetColumn = (string) ($prefill['target_column'] ?? '');
@@ -165,6 +167,7 @@ class PluginUiTableRegistry
 
     private function lookupQuery(Plugin $plugin, array $lookup): ?QueryBuilder
     {
+        // allowHostTable: trusted plugins may read from host tables (e.g. playlists) for lookup options and labels.
         $tableName = $this->tableNameFor($plugin, (string) ($lookup['table'] ?? ''), allowHostTable: true);
         if (! $tableName) {
             return null;
@@ -181,7 +184,7 @@ class PluginUiTableRegistry
             );
     }
 
-    private function columnsFor(Plugin $plugin, string $tableName)
+    private function columnsFor(Plugin $plugin, string $tableName): Collection
     {
         $table = collect(data_get($plugin->schema_definition, 'tables', []))
             ->first(fn (array $table): bool => ($table['name'] ?? null) === $tableName);
@@ -196,7 +199,7 @@ class PluginUiTableRegistry
             && collect($columns)->every(fn (string $column): bool => $column !== '' && Schema::hasColumn($tableName, $column));
     }
 
-    private function prefillSourceRows(string $sourceTable, string $sourceKey, array $source)
+    private function prefillSourceRows(string $sourceTable, string $sourceKey, array $source): Collection
     {
         $userColumn = (string) ($source['user_column'] ?? 'user_id');
         $sourceColumns = [$sourceKey, ...(Schema::hasColumn($sourceTable, $userColumn) ? [$userColumn] : [])];
@@ -210,6 +213,8 @@ class PluginUiTableRegistry
         if (Schema::hasColumn($sourceTable, $orderColumn)) {
             $query->orderBy($orderColumn);
         }
+
+        $query->limit(config('plugins.prefill_max_source_rows', 1000));
 
         return $query->get();
     }

@@ -121,6 +121,10 @@ class PluginManifest
             })
             ->all();
 
+        if (isset($schema['ui_tables']) && ! is_array($schema['ui_tables'])) {
+            throw new RuntimeException('Manifest field [schema.ui_tables] must be a list.');
+        }
+
         return [
             'tables' => $tables,
             'ui_tables' => array_values($schema['ui_tables'] ?? []),

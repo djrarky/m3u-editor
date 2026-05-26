@@ -767,23 +767,31 @@ class PluginValidator
                 }
             }
 
-            foreach ($uiTable['columns'] ?? [] as $columnIndex => $column) {
-                if (! is_array($column) || blank($column['name'] ?? null)) {
-                    $errors[] = "{$path}.columns.{$columnIndex} requires [name].";
+            if (isset($uiTable['columns']) && ! is_array($uiTable['columns'])) {
+                $errors[] = "{$path}.columns must be a list.";
+            } else {
+                foreach ($uiTable['columns'] ?? [] as $columnIndex => $column) {
+                    if (! is_array($column) || blank($column['name'] ?? null)) {
+                        $errors[] = "{$path}.columns.{$columnIndex} requires [name].";
+                    }
                 }
             }
 
-            foreach ($uiTable['fields'] ?? [] as $field) {
-                if (! is_array($field)) {
-                    $errors[] = "{$path}.fields must only contain objects.";
+            if (isset($uiTable['fields']) && ! is_array($uiTable['fields'])) {
+                $errors[] = "{$path}.fields must be a list.";
+            } else {
+                foreach ($uiTable['fields'] ?? [] as $field) {
+                    if (! is_array($field)) {
+                        $errors[] = "{$path}.fields must only contain objects.";
 
-                    continue;
+                        continue;
+                    }
+
+                    $errors = [
+                        ...$errors,
+                        ...$this->validateFieldDefinition($field, $fieldTypes, "{$path}.fields"),
+                    ];
                 }
-
-                $errors = [
-                    ...$errors,
-                    ...$this->validateFieldDefinition($field, $fieldTypes, "{$path}.fields"),
-                ];
             }
         }
 

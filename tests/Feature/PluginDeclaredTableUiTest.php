@@ -6,9 +6,14 @@ use App\Models\Playlist;
 use App\Models\Plugin;
 use App\Models\User;
 use App\Plugins\PluginSchemaManager;
+use App\Plugins\PluginSchemaMapper;
+use App\Plugins\PluginUiTableRegistry;
+use App\Plugins\PluginValidator;
+use App\Plugins\Support\PluginManifest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Exists;
 use Livewire\Livewire;
 
 function declaredTableUiPlugin(): Plugin
@@ -254,4 +259,112 @@ it('prefills plugin-declared table rows from an owned source table', function ()
             'run_availability' => true,
             'run_sync' => true,
         ]);
+});
+
+it('throws when ui_tables is not a list in the manifest', function () {
+    expect(fn () => PluginManifest::fromArray([
+        'id' => 'test-plugin',
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => ['ui_tables' => 'not-an-array'],
+    ], '/tmp/test-plugin'))
+        ->toThrow(RuntimeException::class, 'Manifest field [schema.ui_tables] must be a list.');
+});
+
+it('returns validation errors (not TypeError) when ui_table columns or fields is a non-array', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_test_{$suffix}_items";
+
+    $manifest = PluginManifest::fromArray([
+        'id' => "test-{$suffix}",
+        'name' => 'Test Plugin',
+        'permissions' => [],
+        'schema' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [[
+                'id' => 'items',
+                'table' => $tableName,
+                'label' => 'Items',
+                'columns' => 'bad-string',
+                'fields' => 'bad-string',
+            ]],
+        ],
+    ], '/tmp/test-plugin');
+
+    $validator = app(PluginValidator::class);
+    $method = new ReflectionMethod($validator, 'validateSchema');
+    $errors = $method->invoke($validator, $manifest);
+
+    expect($errors)->toContain('schema.ui_tables.0.columns must be a list.')
+        ->and($errors)->toContain('schema.ui_tables.0.fields must be a list.');
+});
+
+it('generates an exists rule for table_select settings fields', function () {
+    $suffix = Str::lower(Str::random(6));
+    $tableName = "plugin_table_select_test_{$suffix}";
+
+    $plugin = Plugin::query()->create([
+        'plugin_id' => "table-select-rules-{$suffix}",
+        'name' => 'Table Select Rules',
+        'version' => '1.0.0',
+        'api_version' => config('plugins.api_version'),
+        'description' => 'Test fixture for table_select validation rules.',
+        'entrypoint' => 'Plugin.php',
+        'class_name' => 'AppLocalPlugins\\TableSelectRules\\Plugin',
+        'capabilities' => [],
+        'hooks' => [],
+        'permissions' => [],
+        'schema_definition' => [
+            'tables' => [['name' => $tableName, 'columns' => [['type' => 'id', 'name' => 'id']]]],
+            'ui_tables' => [],
+        ],
+        'actions' => [],
+        'settings_schema' => [[
+            'id' => 'selected_item',
+            'label' => 'Selected Item',
+            'type' => 'table_select',
+            'table' => $tableName,
+        ]],
+        'settings' => [],
+        'data_ownership' => [
+            'tables' => [$tableName],
+            'directories' => [],
+            'files' => [],
+            'default_cleanup_policy' => 'preserve',
+        ],
+        'source_type' => 'local_directory',
+        'path' => storage_path('app/testing-plugin-sources/table-select-rules'),
+        'available' => true,
+        'enabled' => true,
+        'installation_status' => 'installed',
+        'trust_state' => 'trusted',
+        'validation_status' => 'valid',
+        'integrity_status' => 'verified',
+    ]);
+
+    $rules = app(PluginSchemaMapper::class)->settingsRules($plugin);
+
+    expect($rules)->toHaveKey('settings.selected_item')
+        ->and(collect($rules['settings.selected_item'])->contains(fn (mixed $r): bool => $r instanceof Exists))->toBeTrue();
+});
+
+it('caps prefill inserts at the prefill_max_source_rows config limit', function () {
+    $user = User::factory()->admin()->create();
+    $this->actingAs($user);
+
+    [$plugin, , $linksTable] = declaredPrefilledTableUiPlugin();
+
+    $cap = 2;
+    config(['plugins.prefill_max_source_rows' => $cap]);
+
+    Playlist::withoutEvents(fn (): array => [
+        Playlist::factory()->for($user)->create(['name' => 'Playlist One']),
+        Playlist::factory()->for($user)->create(['name' => 'Playlist Two']),
+        Playlist::factory()->for($user)->create(['name' => 'Playlist Three']),
+    ]);
+
+    $tableDefinition = data_get($plugin->schema_definition, 'ui_tables.0');
+    app(PluginUiTableRegistry::class)->prefillRows($plugin, $tableDefinition);
+
+    expect(DB::table($linksTable)->count())->toBe($cap);
 });

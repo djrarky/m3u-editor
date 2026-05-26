@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class PluginTableRecord extends Model
 {
+    // All columns are intentionally fillable; the dynamic table name is validated before use.
     protected $guarded = [];
 
     /**

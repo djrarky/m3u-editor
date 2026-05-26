@@ -46,14 +46,14 @@ class PluginSchemaMapper
             return [];
         }
 
-        return $this->rulesForFields($plugin->settings_schema ?? [], 'settings.');
+        return $this->rulesForFields($plugin->settings_schema ?? [], 'settings.', $plugin);
     }
 
     public function actionRules(Plugin $plugin, string $actionId): array
     {
         $action = $plugin->getActionDefinition($actionId);
 
-        return $this->rulesForFields($action['fields'] ?? []);
+        return $this->rulesForFields($action['fields'] ?? [], '', $plugin);
     }
 
     public function defaultsForFields(array $fields, array $existing = []): array
@@ -245,7 +245,7 @@ class PluginSchemaMapper
         return (string) ($field['placeholder'] ?? ((bool) ($field['required'] ?? false) ? __('Select an option') : __('None')));
     }
 
-    private function rulesForFields(array $fields, string $prefix = ''): array
+    private function rulesForFields(array $fields, string $prefix = '', ?Plugin $plugin = null): array
     {
         $rules = [];
 
@@ -253,7 +253,7 @@ class PluginSchemaMapper
             if (($field['type'] ?? null) === 'section') {
                 $rules = [
                     ...$rules,
-                    ...$this->rulesForFields($field['fields'] ?? [], $prefix),
+                    ...$this->rulesForFields($field['fields'] ?? [], $prefix, $plugin),
                 ];
 
                 continue;
@@ -281,7 +281,7 @@ class PluginSchemaMapper
                 // Per-item rule applied via wildcard.
                 $rules[$name.'.*'] = $isMultiModelSelect
                     ? ['integer', $this->modelSelectExistsRule($field)]
-                    : ['integer'];
+                    : ($plugin ? ['integer', $this->tableSelectExistsRule($field, $plugin)] : ['integer']);
 
                 continue;
             }
@@ -313,7 +313,7 @@ class PluginSchemaMapper
                     'textarea', 'text' => ['string'],
                     'select' => ['string', Rule::in(array_keys($field['options'] ?? []))],
                     'model_select' => ['integer', $this->modelSelectExistsRule($field)],
-                    'table_select' => ['integer'],
+                    'table_select' => $plugin ? ['integer', $this->tableSelectExistsRule($field, $plugin)] : ['integer'],
                     'tags' => ['string'],
                     default => ['string'],
                 },
@@ -334,6 +334,29 @@ class PluginSchemaMapper
 
         if (($field['scope'] ?? null) === 'owned' && auth()->check() && ! auth()->user()->isAdmin() && Schema::hasColumn($model->getTable(), 'user_id')) {
             $rule->where(fn ($query) => $query->where('user_id', auth()->id()));
+        }
+
+        return $rule;
+    }
+
+    private function tableSelectExistsRule(array $field, Plugin $plugin): Exists
+    {
+        $tableName = app(PluginUiTableRegistry::class)->tableNameFor(
+            $plugin,
+            (string) ($field['table'] ?? ''),
+            allowHostTable: false,
+        );
+
+        $keyColumn = (string) ($field['value_column'] ?? 'id');
+        // Use a guaranteed-invalid table name when the table cannot be resolved so the rule always fails safely.
+        $rule = Rule::exists($tableName ?? '_invalid_table_', $keyColumn);
+
+        if ((bool) ($field['scope_plugin'] ?? false) && $tableName && Schema::hasColumn($tableName, 'extension_plugin_id')) {
+            $rule->where('extension_plugin_id', $plugin->id);
+        }
+
+        if ((bool) ($field['enabled_only'] ?? false) && $tableName && Schema::hasColumn($tableName, 'enabled')) {
+            $rule->where('enabled', true);
         }
 
         return $rule;
