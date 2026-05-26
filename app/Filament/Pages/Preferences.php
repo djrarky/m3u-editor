@@ -32,6 +32,7 @@ use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Notifications\Notification;
 use Filament\Pages\SettingsPage;
 use Filament\Schemas\Components\Fieldset;
@@ -227,11 +228,18 @@ class Preferences extends SettingsPage
                                     ->schema([
                                         Grid::make()
                                             ->columnSpanFull()
-                                            ->columns(2)
+                                            ->columns(3)
                                             ->schema([
                                                 Toggle::make('show_breadcrumbs')
                                                     ->label(__('Show breadcrumbs'))
                                                     ->helperText(__('Show breadcrumbs under the page titles')),
+                                                Toggle::make('suppress_success_notifications')
+                                                    ->label(__('Suppress success notifications'))
+                                                    ->hintIcon(
+                                                        'heroicon-m-question-mark-circle',
+                                                        tooltip: 'When enabled, success notifications from background tasks (e.g. sync completed successfully) will be hidden. Errors and warnings will still be shown regardless of this setting.'
+                                                    )
+                                                    ->helperText(__('Hide success notifications from background tasks (errors and warnings are always shown).')),
                                                 Toggle::make('output_wan_address')
                                                     ->label(__('Output WAN address in menu'))
                                                     ->helperText(__('When enabled, the application will output the WAN address of the server m3u-editor is currently running on.'))
@@ -1343,12 +1351,38 @@ class Preferences extends SettingsPage
                                             ->helperText(__('Preferred language for TMDB searches.')),
                                         Toggle::make('tmdb_auto_lookup_on_import')
                                             ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists. Will only be fetched for enabled items.'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists.'))
+                                            ->live()
                                             ->default(false),
                                         Toggle::make('tmdb_auto_create_groups')
                                             ->label(__('Auto-create groups/categories from TMDB genres'))
                                             ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
                                             ->default(false),
+                                        Fieldset::make(__('TMDB Auto-lookup Settings'))
+                                            ->columnSpanFull()
+                                            ->schema([
+                                                ToggleButtons::make('tmdb_auto_lookup_all_new')
+                                                    ->options([
+                                                        'enabled' => __('Only enabled'),
+                                                        'new' => __('All new'),
+                                                        'both' => __('Both'),
+                                                    ])
+                                                    ->icons([
+                                                        'enabled' => 'heroicon-s-check',
+                                                        'new' => 'heroicon-s-plus',
+                                                        'both' => 'heroicon-s-squares-plus',
+                                                    ])
+                                                    ->colors([
+                                                        'enabled' => 'success',
+                                                        'new' => 'primary',
+                                                        'both' => 'primary',
+                                                    ])
+                                                    ->columnSpanFull()
+                                                    ->grouped()
+                                                    ->label(__('Auto-lookup scope'))
+                                                    ->helperText(__('Whether to automatically lookup TMDB IDs for all new VOD and Series, or only those that are enabled (default), or both.'))
+                                                    ->default('enabled'),
+                                            ])->hidden(fn (Get $get): bool => ! (bool) $get('tmdb_auto_lookup_on_import')),
                                         TextInput::make('tmdb_rate_limit')
                                             ->label(__('Rate Limit (requests/second)'))
                                             ->placeholder(__('40'))
@@ -1424,6 +1458,7 @@ class Preferences extends SettingsPage
                                                         'groq' => 'Groq',
                                                         'deepseek' => 'DeepSeek',
                                                         'xai' => 'xAI (Grok)',
+                                                        'minimax' => 'MiniMax',
                                                         'openrouter' => 'OpenRouter',
                                                         'ollama' => 'Ollama (Local)',
                                                     ])
@@ -1433,15 +1468,16 @@ class Preferences extends SettingsPage
                                                 TextInput::make('copilot_model')
                                                     ->label(__('Model'))
                                                     ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
-                                                        'anthropic' => 'claude-sonnet-4',
+                                                        'anthropic' => 'claude-sonnet-4-6',
                                                         'gemini' => 'gemini-2.5-flash',
                                                         'mistral' => 'mistral-large-latest',
                                                         'groq' => 'llama-3.3-70b-versatile',
-                                                        'deepseek' => 'deepseek-chat',
+                                                        'deepseek' => 'deepseek-v4-flash',
                                                         'xai' => 'grok-3',
-                                                        'openrouter' => 'openai/gpt-4o',
+                                                        'minimax' => 'MiniMax-M2.7',
+                                                        'openrouter' => 'openai/gpt-5.4',
                                                         'ollama' => 'llama3',
-                                                        default => 'gpt-4o',
+                                                        default => 'gpt-5.4-mini',
                                                     })
                                                     ->helperText(__('The model to use. Leave blank to use the provider default.')),
                                             ]),
@@ -1458,9 +1494,10 @@ class Preferences extends SettingsPage
                                             ->url()
                                             ->placeholder(fn (Get $get): string => match ($get('copilot_provider')) {
                                                 'ollama' => 'http://localhost:11434',
+                                                'minimax' => 'https://api.minimax.io/v1',
                                                 default => 'https://api.openai.com/v1',
                                             })
-                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama']))
+                                            ->visible(fn (Get $get): bool => in_array($get('copilot_provider'), ['openai', 'ollama', 'minimax']))
                                             ->helperText(__('Override the default API base URL. Leave blank to use the provider default. Useful for self-hosted models or proxy endpoints.')),
                                     ]),
                                 Section::make(__('System Prompt'))

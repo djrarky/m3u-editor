@@ -7,6 +7,9 @@ use Spatie\LaravelSettings\Settings;
 
 class GeneralSettings extends Settings
 {
+    // Notification settings
+    public ?bool $suppress_success_notifications = false;
+
     // General UI settings
     public ?string $navigation_position = 'left';
 
@@ -212,6 +215,8 @@ class GeneralSettings extends Settings
     public ?string $tmdb_api_key = null;
 
     public ?bool $tmdb_auto_lookup_on_import = false;
+
+    public ?string $tmdb_auto_lookup_all_new = 'enabled';
 
     public ?int $tmdb_rate_limit = 40;
 
