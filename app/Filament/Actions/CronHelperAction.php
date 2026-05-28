@@ -38,6 +38,14 @@ class CronHelperAction
                         ->label(__('Cron Expression'))
                         ->default($initialExpression)
                         ->placeholder('0 */6 * * *')
+                        ->live(debounce: 500)
+                        ->helperText(function (Get $get): string {
+                            $expression = trim((string) ($get('expression') ?? ''));
+
+                            return $expression && CronService::isValid($expression)
+                                ? CronService::describe($expression)
+                                : __('Format: minute  hour  day  month  weekday');
+                        })
                         ->hintAction(
                             Action::make('view_cron_example')
                                 ->label(__('CRON Example'))
@@ -47,7 +55,6 @@ class CronHelperAction
                                 ->url('https://crontab.guru')
                                 ->openUrlInNewTab(true)
                         )
-                        ->helperText(__('Format: minute  hour  day  month  weekday'))
                         ->columnSpanFull(),
 
                     Select::make('preset')
@@ -101,8 +108,8 @@ class CronHelperAction
 
                     KeyValue::make('preview_data')
                         ->label(__('Preview'))
-                        ->keyLabel(__('Schedule'))
-                        ->valueLabel('')
+                        ->keyLabel(__('Run'))
+                        ->valueLabel(__('Date & Time'))
                         ->addable(false)
                         ->deletable(false)
                         ->editableKeys(false)
