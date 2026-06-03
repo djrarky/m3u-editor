@@ -24,6 +24,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -704,12 +705,30 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 continue;
             }
 
+            // The JSONL scan is the only expensive step in this loop. Cache the
+            // raw programme list per (Epg, channel set, date range) for 60s so
+            // back-to-back refreshes (the page polls every 3–30s) don't re-read
+            // the daily files. Progress / current / next are still re-derived
+            // from this list on every render so the progress bar updates live.
+            sort($ids);
+            $cacheKey = sprintf(
+                'stream-monitor:epg:%s:%s:%s..%s',
+                $uuid,
+                md5(implode(',', $ids)),
+                $yesterday,
+                $tomorrow,
+            );
+
             try {
-                $programmesByEpgChannel[$uuid] = $cacheService->getCachedProgrammesRange(
-                    $epg,
-                    $yesterday,
-                    $tomorrow,
-                    $ids,
+                $programmesByEpgChannel[$uuid] = Cache::remember(
+                    $cacheKey,
+                    60,
+                    fn () => $cacheService->getCachedProgrammesRange(
+                        $epg,
+                        $yesterday,
+                        $tomorrow,
+                        $ids,
+                    ),
                 );
             } catch (Exception $e) {
                 Log::warning('Stream monitor: failed to read cached EPG programmes', [
