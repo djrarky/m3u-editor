@@ -5,6 +5,7 @@
     <div x-data="{
         intervalSeconds: (() => { const s = Number(localStorage.getItem('streamMonitor.refreshInterval')); return [0, 3, 5, 10, 30].includes(s) ? s : {{ $refreshInterval }}; })(),
         intervalId: null,
+        showUrls: (() => { const v = localStorage.getItem('streamMonitor.showUrls'); return v === null ? true : v === '1'; })(),
         startPolling() {
             this.stopPolling();
             if (this.intervalSeconds <= 0) return;
@@ -24,6 +25,9 @@
     $watch('intervalSeconds', value => {
         localStorage.setItem('streamMonitor.refreshInterval', value);
         startPolling();
+    });
+    $watch('showUrls', value => {
+        localStorage.setItem('streamMonitor.showUrls', value ? '1' : '0');
     });
     const onVisibilityChange = () => {
         if (document.visibilityState === 'visible' && intervalSeconds > 0) {
@@ -114,6 +118,14 @@
                         x-text="$wire.lastUpdatedAt ? new Date($wire.lastUpdatedAt).toLocaleTimeString() : '—'"></span>
                 </x-filament::badge>
             </div>
+
+            <div class="flex items-center">
+                <x-filament::button color="gray" size="sm" @click="showUrls = !showUrls"
+                    x-bind:icon="showUrls ? 'heroicon-o-eye-slash' : 'heroicon-o-eye'"
+                    aria-label="Toggle URL visibility">
+                    <span x-text="showUrls ? 'Hide URLs' : 'Show URLs'"></span>
+                </x-filament::button>
+            </div>
         </div>
 
         <!-- Streams List -->
@@ -202,7 +214,8 @@
                                                     class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
                                             @endif
                                         </p>
-                                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate">
+                                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate transition-[filter] duration-150"
+                                            :class="{ 'blur-xs select-none': !showUrls }">
                                             {{ $stream['source_url'] }}
                                         </p>
                                     </div>
@@ -685,12 +698,14 @@
                                                         </p>
                                                         <p class="text-xs text-orange-600 dark:text-orange-300 mt-1">
                                                             Original URL: <span
-                                                                class="font-mono break-all">{{ $stream['source_url'] }}</span>
+                                                                class="font-mono break-all transition-[filter] duration-150"
+                                                                :class="{ 'blur-sm select-none': !showUrls }">{{ $stream['source_url'] }}</span>
                                                         </p>
                                                         @if ($stream['current_url'] && $stream['current_url'] !== $stream['source_url'])
                                                             <p class="text-xs text-orange-600 dark:text-orange-300">
                                                                 Current URL: <span
-                                                                    class="font-mono break-all">{{ $stream['current_url'] }}</span>
+                                                                    class="font-mono break-all transition-[filter] duration-150"
+                                                                    :class="{ 'blur-sm select-none': !showUrls }">{{ $stream['current_url'] }}</span>
                                                             </p>
                                                         @endif
                                                     </div>
@@ -716,7 +731,8 @@
                                                                     {{ $index + 1 }}
                                                                 </x-filament::badge>
                                                                 <span
-                                                                    class="{{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}">
+                                                                    class="transition-[filter] duration-150 {{ $stream['current_failover_index'] === $index + 1 ? 'text-orange-600 dark:text-orange-400 font-medium' : '' }}"
+                                                                    :class="{ 'blur-sm select-none': !showUrls }">
                                                                     {{ $url }}
                                                                 </span>
                                                                 @if ($stream['current_failover_index'] === $index + 1)
