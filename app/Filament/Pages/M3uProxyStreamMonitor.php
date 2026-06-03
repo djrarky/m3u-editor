@@ -4,12 +4,15 @@ namespace App\Filament\Pages;
 
 use App\Facades\LogoFacade;
 use App\Models\Channel;
+use App\Models\Epg;
+use App\Models\EpgChannel;
 use App\Models\Episode;
 use App\Models\Network;
 use App\Models\Playlist;
 use App\Models\PlaylistAlias;
 use App\Models\PlaylistProfile;
 use App\Models\StreamProfile;
+use App\Services\EpgCacheService;
 use App\Services\M3uProxyService;
 use App\Services\PlaylistUrlService;
 use Carbon\Carbon;
@@ -20,6 +23,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Contracts\HasSchemas;
 use Filament\Support\Enums\Size;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
@@ -299,13 +303,29 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 
             $channelsById = $channelIds->isNotEmpty()
                 ? Channel::whereIn('id', $channelIds)
-                    ->with('failoverChannels')
+                    ->with(['failoverChannels'])
                     ->get()
                     ->keyBy('id')
                 : collect();
             $episodesById = $episodeIds->isNotEmpty()
                 ? Episode::whereIn('id', $episodeIds)->get()->keyBy('id')
                 : collect();
+
+            // Pre-fetch EPG programmes covering yesterday/today/tomorrow for every
+            // unique (Epg, xmltv channel_id) pair referenced by an active channel
+            // stream, so per-stream lookup is a simple array access (no N+1 disk IO).
+            // Channel::epgChannel() uses withoutEagerLoads() so we resolve the
+            // EpgChannel + Epg records explicitly here instead of via with().
+            $epgChannelIds = $channelsById->pluck('epg_channel_id')->filter()->unique()->values();
+            $epgChannelsById = $epgChannelIds->isNotEmpty()
+                ? EpgChannel::whereIn('id', $epgChannelIds)->get()->keyBy('id')
+                : collect();
+            $epgIds = $epgChannelsById->pluck('epg_id')->filter()->unique()->values();
+            $epgsById = $epgIds->isNotEmpty()
+                ? Epg::whereIn('id', $epgIds)->get()->keyBy('id')
+                : collect();
+
+            $programmesByEpgChannel = $this->prefetchEpgProgrammes($epgChannelsById, $epgsById);
 
             // Pre-fetch transcoding (StreamProfile) and provider (PlaylistProfile) profiles
             $streamProfileIds = collect($apiStreams['streams'])
@@ -335,6 +355,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 $title = null;
                 $logo = null;
                 $failoverChannel = null;
+                $epgInfo = null;
                 if (isset($stream['metadata']['type']) && isset($stream['metadata']['id'])) {
                     $modelType = $stream['metadata']['type'];
                     $modelId = $stream['metadata']['id'];
@@ -343,6 +364,17 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                         if ($channel) {
                             $title = $channel->name_custom ?? $channel->name ?? $channel->title;
                             $logo = LogoFacade::getChannelLogoUrl($channel);
+
+                            $epgChannel = $channel->epg_channel_id
+                                ? ($epgChannelsById[$channel->epg_channel_id] ?? null)
+                                : null;
+                            $epg = $epgChannel
+                                ? ($epgsById[$epgChannel->epg_id] ?? null)
+                                : null;
+                            if ($epg && $epgChannel) {
+                                $programmes = $programmesByEpgChannel[$epg->uuid][$epgChannel->channel_id] ?? [];
+                                $epgInfo = $this->resolveCurrentNextFromProgrammes($programmes);
+                            }
                         }
                     } elseif ($modelType === 'episode') {
                         $episode = $episodesById[$modelId] ?? null;
@@ -575,6 +607,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                         : null,
                     'using_failover' => ($stream['current_failover_index'] ?? 0) > 0 || ($stream['failover_attempts'] ?? 0) > 0,
                     'failover_channel' => $failoverChannel,
+                    'epg' => $epgInfo,
                 ];
             }
         }
@@ -587,7 +620,7 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                 ->unique()
                 ->values();
             $networksByUuid = Network::whereIn('uuid', $broadcastNetworkUuids)
-                ->get(['uuid', 'name'])
+                ->get(['id', 'uuid', 'name'])
                 ->keyBy('uuid');
 
             foreach ($apiBroadcasts['broadcasts'] as $bcast) {
@@ -595,6 +628,8 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
 
                 $startedAt = isset($bcast['started_at']) ? Carbon::parse($bcast['started_at'], 'UTC') : null;
                 $uptime = $startedAt ? $startedAt->diffForHumans(null, true) : 'N/A';
+
+                $broadcastEpg = $network ? $this->resolveCurrentNextFromNetwork($network) : null;
 
                 $streams[] = [
                     'stream_id' => 'broadcast:'.$bcast['network_id'],
@@ -622,11 +657,160 @@ class M3uProxyStreamMonitor extends Page implements HasActions, HasSchemas
                     'failover_channel' => null,
                     'broadcast' => true,
                     'alias_name' => null,
+                    'epg' => $broadcastEpg,
                 ];
             }
         }
 
         return $streams;
+    }
+
+    /**
+     * Pre-fetch EPG programmes for every EpgChannel referenced by an active
+     * Channel stream, grouped by Epg uuid + xmltv channel id. Covers
+     * yesterday/today/tomorrow so the across-midnight current programme is
+     * always present.
+     *
+     * @param  Collection<int, EpgChannel>  $epgChannelsById
+     * @param  Collection<int, Epg>  $epgsById
+     * @return array<string, array<string, array<int, array<string, mixed>>>>
+     */
+    protected function prefetchEpgProgrammes($epgChannelsById, $epgsById): array
+    {
+        $xmltvIdsByEpgUuid = [];
+        $epgsByUuid = [];
+
+        foreach ($epgChannelsById as $epgChannel) {
+            $epg = $epgsById[$epgChannel->epg_id] ?? null;
+            if (! $epg || ! $epg->uuid || ! $epgChannel->channel_id) {
+                continue;
+            }
+            $epgsByUuid[$epg->uuid] = $epg;
+            $xmltvIdsByEpgUuid[$epg->uuid][] = $epgChannel->channel_id;
+        }
+
+        if (empty($epgsByUuid)) {
+            return [];
+        }
+
+        $cacheService = app(EpgCacheService::class);
+        $yesterday = now()->subDay()->format('Y-m-d');
+        $tomorrow = now()->addDay()->format('Y-m-d');
+
+        $programmesByEpgChannel = [];
+        foreach ($epgsByUuid as $uuid => $epg) {
+            $ids = array_values(array_unique(array_filter($xmltvIdsByEpgUuid[$uuid] ?? [])));
+            if (empty($ids)) {
+                continue;
+            }
+
+            try {
+                $programmesByEpgChannel[$uuid] = $cacheService->getCachedProgrammesRange(
+                    $epg,
+                    $yesterday,
+                    $tomorrow,
+                    $ids,
+                );
+            } catch (Exception $e) {
+                Log::warning('Stream monitor: failed to read cached EPG programmes', [
+                    'epg_uuid' => $uuid,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return $programmesByEpgChannel;
+    }
+
+    /**
+     * Resolve current + next programme from a sorted list of XMLTV programme records.
+     */
+    protected function resolveCurrentNextFromProgrammes(array $programmes): ?array
+    {
+        if (empty($programmes)) {
+            return null;
+        }
+
+        $now = now();
+        $currentIdx = -1;
+
+        foreach ($programmes as $i => $p) {
+            if (! isset($p['start'], $p['stop'])) {
+                continue;
+            }
+
+            try {
+                $start = Carbon::parse($p['start']);
+                $stop = Carbon::parse($p['stop']);
+            } catch (Exception $e) {
+                continue;
+            }
+
+            if ($start->lte($now) && $stop->gt($now)) {
+                $currentIdx = $i;
+                break;
+            }
+        }
+
+        if ($currentIdx === -1) {
+            return null;
+        }
+
+        $current = $programmes[$currentIdx];
+        $startTs = Carbon::parse($current['start']);
+        $stopTs = Carbon::parse($current['stop']);
+        $duration = $startTs->diffInSeconds($stopTs);
+        $elapsed = $startTs->diffInSeconds($now);
+        $progress = $duration > 0 ? min(max($elapsed / $duration, 0), 1) : 0;
+
+        $next = $programmes[$currentIdx + 1] ?? null;
+
+        return [
+            'current' => [
+                'title' => $current['title'] ?? 'N/A',
+                'description' => $current['desc'] ?? null,
+                'start' => $startTs->toIso8601String(),
+                'stop' => $stopTs->toIso8601String(),
+                'progress' => round($progress, 4),
+            ],
+            'next' => $next ? [
+                'title' => $next['title'] ?? 'N/A',
+                'start' => isset($next['start']) ? Carbon::parse($next['start'])->toIso8601String() : null,
+                'stop' => isset($next['stop']) ? Carbon::parse($next['stop'])->toIso8601String() : null,
+            ] : null,
+        ];
+    }
+
+    /**
+     * Resolve current + next programme from a Network's DB-backed schedule.
+     */
+    protected function resolveCurrentNextFromNetwork(Network $network): ?array
+    {
+        $current = $network->getCurrentProgramme();
+        if (! $current) {
+            return null;
+        }
+
+        $duration = $current->start_time->diffInSeconds($current->end_time);
+        $elapsed = $current->start_time->diffInSeconds(now());
+        $progress = $duration > 0 ? min(max($elapsed / $duration, 0), 1) : 0;
+
+        $next = $network->getNextProgramme();
+
+        return [
+            'current' => [
+                'title' => $current->title,
+                'description' => $current->description ?? null,
+                'start' => $current->start_time->toIso8601String(),
+                'stop' => $current->end_time->toIso8601String(),
+                'progress' => round($progress, 4),
+            ],
+            'next' => $next ? [
+                'title' => $next->title,
+                'start' => $next->start_time->toIso8601String(),
+                'stop' => $next->end_time->toIso8601String(),
+            ] : null,
+        ];
     }
 
     // Reuse helper methods from original monitor

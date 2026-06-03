@@ -161,7 +161,7 @@
                     <x-filament::card>
                         <div x-data="{ showClients: false, showDetails: false }">
                             <!-- Stream Header -->
-                            <div class="md:flex items-center justify-between mb-4">
+                            <div class="md:flex items-center justify-between mb-4 overflow-hidden">
                                 <div class="md:flex items-center space-x-0 md:space-x-4 space-y-2 md:space-y-0">
                                     <div class="flex-shrink-0">
                                         @php
@@ -185,14 +185,12 @@
                                         </div>
                                     </div>
                                     @if ($stream['model']['logo'] ?? false)
-                                        <div class="flex-1 shrink-0 min-w-0">
-                                            <div>
-                                                <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail"
-                                                    class="h-10 w-auto rounded-md object-cover">
-                                            </div>
+                                        <div class="shrink-0">
+                                            <img src="{{ $stream['model']['logo'] }}" alt="Stream Thumbnail"
+                                                class="h-10 w-auto rounded-md object-cover">
                                         </div>
                                     @endif
-                                    <div class="min-w-0">
+                                    <div class="flex-1 min-w-0">
                                         <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
                                             Stream {{ substr($stream['stream_id'], -8) }}
                                         </h3>
@@ -204,8 +202,10 @@
                                                     class="text-orange-600 dark:text-orange-400 font-medium">{{ $stream['failover_channel']['title'] }}</span>
                                             @endif
                                         </p>
-                                        <p class="text-sm text-gray-500 dark:text-gray-400 font-mono truncate">
-                                            {{ $stream['source_url'] }}</p>
+                                        <p
+                                            class="text-sm max-w-full flex-shrink text-gray-500 dark:text-gray-400 font-mono truncate">
+                                            {{ $stream['source_url'] }}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -268,6 +268,76 @@
                                     {{ ucfirst($stream['status']) }}
                                 </x-filament::badge>
                             </div>
+
+                            @php
+                                $epg = $stream['epg'] ?? null;
+                                $epgCurrent = $epg['current'] ?? null;
+                                $epgNext = $epg['next'] ?? null;
+                                $epgProgress = $epgCurrent ? (int) round(($epgCurrent['progress'] ?? 0) * 100) : 0;
+                                $epgStartLabel = null;
+                                $epgStopLabel = null;
+                                if ($epgCurrent) {
+                                    try {
+                                        $epgStartLabel = \Illuminate\Support\Carbon::parse(
+                                            $epgCurrent['start'],
+                                        )->format('g:i A');
+                                        $epgStopLabel = \Illuminate\Support\Carbon::parse($epgCurrent['stop'])->format(
+                                            'g:i A',
+                                        );
+                                    } catch (\Throwable $e) {
+                                        // ignore parse errors; fall back to no label
+                                    }
+                                }
+                            @endphp
+                            @if ($epgCurrent)
+                                <!-- Current Programme + Up Next (mirrors the m3u-tv player overlay) -->
+                                <div
+                                    class="mb-4 rounded-lg border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800/60">
+                                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                                        <x-filament::badge color="danger" size="sm" icon="heroicon-s-signal">
+                                            Live
+                                        </x-filament::badge>
+                                        <span class="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                                            {{ $epgCurrent['title'] }}
+                                        </span>
+                                        @if ($epgStartLabel && $epgStopLabel)
+                                            <span class="text-xs text-gray-500 dark:text-gray-400">
+                                                {{ $epgStartLabel }} – {{ $epgStopLabel }}
+                                            </span>
+                                        @endif
+                                        <span class="text-xs text-gray-500 dark:text-gray-400 ml-auto">
+                                            {{ $epgProgress }}%
+                                        </span>
+                                    </div>
+                                    <div
+                                        class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                                        <div class="h-full rounded-full bg-primary-500 dark:bg-primary-400 transition-[width] duration-500"
+                                            style="width: {{ $epgProgress }}%;"></div>
+                                    </div>
+                                    @if ($epgNext)
+                                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                                            <span class="font-medium text-gray-600 dark:text-gray-300">Next:</span>
+                                            {{ $epgNext['title'] }}
+                                            @if (!empty($epgNext['start']))
+                                                @php
+                                                    try {
+                                                        $nextStartLabel = \Illuminate\Support\Carbon::parse(
+                                                            $epgNext['start'],
+                                                        )->format('g:i A');
+                                                    } catch (\Throwable $e) {
+                                                        $nextStartLabel = null;
+                                                    }
+                                                @endphp
+                                                @if ($nextStartLabel)
+                                                    <span class="text-gray-400 dark:text-gray-500">
+                                                        · {{ $nextStartLabel }}
+                                                    </span>
+                                                @endif
+                                            @endif
+                                        </p>
+                                    @endif
+                                </div>
+                            @endif
 
                             <!-- Stream Stats Grid -->
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
