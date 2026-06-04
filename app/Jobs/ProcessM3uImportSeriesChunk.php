@@ -109,8 +109,15 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             return; // skip this category if there's an error
         }
 
-        // --- Phase 1: parse the HTTP response into plain PHP arrays (no DB writes) ---
-        $rawItems = [];
+        // Single-pass stream: pluck existing rows once for O(1) lookup, then iterate
+        // the JSON stream and immediately route each item to an update or a rolling
+        // insert buffer — never accumulating more than 100 rows at a time.
+        $existingSeriesIds = $playlist->series()
+            ->where('source_category_id', $sourceCategoryId)
+            ->pluck('last_modified', 'source_series_id');
+
+        $insertBuffer = [];
+
         foreach (Items::fromString($seriesStreamsResponse->body()) as $item) {
             $itemName = trim((string) ($item->name ?? $item->title ?? ''));
             if ($itemName === '') {
@@ -121,10 +128,28 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
                 : null;
 
-            $rawItems[] = [
+            $existing = $existingSeriesIds->get($item->series_id);
+
+            if ($existing !== null) {
+                // Already in DB — only update last_modified if it changed
+                if ($lastModified && $lastModified !== $existing) {
+                    $playlist->series()
+                        ->where('source_series_id', $item->series_id)
+                        ->where('source_category_id', $sourceCategoryId)
+                        ->update(['last_modified' => $lastModified]);
+                }
+
+                continue;
+            }
+
+            $insertBuffer[] = [
+                'enabled' => $this->autoEnable,
                 'name' => $itemName,
                 'source_series_id' => $item->series_id,
-                'last_modified' => $lastModified,
+                'source_category_id' => $sourceCategoryId,
+                'import_batch_no' => $this->batchNo,
+                'user_id' => $playlist->user_id,
+                'playlist_id' => $playlist->id,
                 'sort' => $item->num ?? null,
                 'cover' => $item->cover ?? null,
                 'plot' => $item->plot ?? null,
@@ -136,34 +161,17 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
                 'rating_5based' => (float) ($item->rating_5based ?? 0),
                 'backdrop_path' => json_encode($item->backdrop_path ?? []),
                 'youtube_trailer' => $item->youtube_trailer ?? null,
+                'last_modified' => $lastModified,
             ];
-        }
 
-        // --- Phase 2: identify which series already exist (read-only, outside transaction) ---
-        $existingSeriesIds = $playlist->series()
-            ->where('source_category_id', $sourceCategoryId)
-            ->pluck('last_modified', 'source_series_id');
-
-        $toUpdate = [];
-        $toInsert = [];
-        foreach ($rawItems as $raw) {
-            $existing = $existingSeriesIds->get($raw['source_series_id']);
-            if ($existing !== null) {
-                // Only queue an update if last_modified actually changed
-                if ($raw['last_modified'] && $raw['last_modified'] !== $existing) {
-                    $toUpdate[] = ['source_series_id' => $raw['source_series_id'], 'last_modified' => $raw['last_modified']];
-                }
-            } else {
-                $toInsert[] = $raw;
+            if (count($insertBuffer) === 100) {
+                $this->flushInsertBuffer($insertBuffer, $playlist, $sourceCategoryId, $sourceCategoryName);
+                $insertBuffer = [];
             }
         }
 
-        // Apply last_modified updates for existing series (simple row updates, no FK risk)
-        foreach ($toUpdate as $upd) {
-            $playlist->series()
-                ->where('source_series_id', $upd['source_series_id'])
-                ->where('source_category_id', $sourceCategoryId)
-                ->update(['last_modified' => $upd['last_modified']]);
+        if ($insertBuffer !== []) {
+            $this->flushInsertBuffer($insertBuffer, $playlist, $sourceCategoryId, $sourceCategoryName);
         }
 
         // Update progress: scale 0→99 across all chunks using index position
@@ -171,75 +179,55 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
         $playlist->update([
             'series_progress' => min(99, $chunkProgress),
         ]);
+    }
 
-        if (empty($toInsert)) {
-            return;
-        }
+    /**
+     * Insert a buffer of new series rows inside a retryable transaction.
+     *
+     * The category is resolved inside the transaction so it always holds the
+     * correct import_batch_no. This prevents seriesCleanup in a concurrent sync
+     * from deleting the category row while the INSERT is in flight (which would
+     * cause a series_category_id_foreign FK violation). SQLSTATE 23503 is caught
+     * and logged without rethrowing so a transient race doesn't abort the chain.
+     */
+    private function flushInsertBuffer(array $rows, Playlist $playlist, mixed $sourceCategoryId, ?string $sourceCategoryName): void
+    {
+        try {
+            DB::transaction(function () use ($rows, $playlist, $sourceCategoryId, $sourceCategoryName) {
+                $category = Category::firstOrCreate(
+                    ['playlist_id' => $playlist->id, 'source_category_id' => $sourceCategoryId],
+                    [
+                        'name' => $sourceCategoryName,
+                        'name_internal' => $sourceCategoryName,
+                        'user_id' => $playlist->user_id,
+                        'import_batch_no' => $this->batchNo,
+                    ]
+                );
 
-        // --- Phase 3: ensure category exists and bulk-insert new series atomically ---
-        // Wrapped in a transaction with 5 deadlock-retry attempts.
-        // The category is created (or fetched) inside the transaction with import_batch_no
-        // so that a concurrent sync's seriesCleanup cannot delete it while we hold the
-        // transaction lock — preventing the series_category_id_foreign FK violation.
-        $playlistId = $playlist->id;
-        $userId = $playlist->user_id;
-        $batchNo = $this->batchNo;
-        $autoEnable = $this->autoEnable;
-
-        collect($toInsert)->chunk(100)->each(function ($chunk) use (
-            $playlistId, $userId, $batchNo, $sourceCategoryId, $sourceCategoryName, $autoEnable
-        ) {
-            try {
-                DB::transaction(function () use (
-                    $chunk, $playlistId, $userId, $batchNo,
-                    $sourceCategoryId, $sourceCategoryName, $autoEnable
-                ) {
-                    // Get or create the category inside the transaction so the row exists
-                    // for the duration of the insert. Include import_batch_no so cleanup
-                    // queries (import_batch_no != $batchNo) leave this category alone.
-                    $category = Category::firstOrCreate(
-                        ['playlist_id' => $playlistId, 'source_category_id' => $sourceCategoryId],
-                        [
-                            'name' => $sourceCategoryName,
-                            'name_internal' => $sourceCategoryName,
-                            'user_id' => $userId,
-                            'import_batch_no' => $batchNo,
-                        ]
-                    );
-
-                    $rows = $chunk->map(fn ($raw) => array_merge($raw, [
-                        'enabled' => $autoEnable,
-                        'source_category_id' => $sourceCategoryId,
-                        'import_batch_no' => $batchNo,
-                        'user_id' => $userId,
-                        'playlist_id' => $playlistId,
-                        'category_id' => $category->id,
-                    ]))->toArray();
-
-                    Series::insertOrIgnore($rows);
-                }, 5);
-            } catch (QueryException $e) {
-                // SQLSTATE 23503 = foreign_key_violation (PostgreSQL).
-                // This can occur when a concurrent sync's seriesCleanup deletes the
-                // category between our transaction retries. Log and skip — the series
-                // will be picked up on the next successful sync.
-                if ($e->getCode() === '23503') {
-                    Log::warning('Series bulk insert skipped: category deleted by concurrent sync', [
-                        'source_category_id' => $sourceCategoryId,
-                        'playlist_id' => $playlistId,
-                        'error' => $e->getMessage(),
-                    ]);
-
-                    return;
-                }
-
-                Log::error('Series bulk insert failed', [
-                    'exception' => $e->getMessage(),
+                Series::insertOrIgnore(
+                    array_map(fn ($row) => $row + ['category_id' => $category->id], $rows)
+                );
+            }, 5);
+        } catch (QueryException $e) {
+            // SQLSTATE 23503 = foreign_key_violation (PostgreSQL).
+            // Occurs when a concurrent sync's seriesCleanup deletes the category between
+            // transaction retries. Log and skip — series are re-imported on next sync.
+            if ($e->getCode() === '23503') {
+                Log::warning('Series insert skipped: category deleted by concurrent sync', [
                     'source_category_id' => $sourceCategoryId,
+                    'playlist_id' => $playlist->id,
+                    'error' => $e->getMessage(),
                 ]);
 
-                throw $e;
+                return;
             }
-        });
+
+            Log::error('Series bulk insert failed', [
+                'exception' => $e->getMessage(),
+                'source_category_id' => $sourceCategoryId,
+            ]);
+
+            throw $e;
+        }
     }
 }
