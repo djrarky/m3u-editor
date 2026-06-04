@@ -10,7 +10,9 @@ use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use JsonMachine\Items;
@@ -107,67 +109,61 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             return; // skip this category if there's an error
         }
 
-        $bulk = [];
-        $seriesStreams = Items::fromString($seriesStreamsResponse->body());
-
-        // Get the category for this import, creating it if it doesn't yet exist
-        $category = Category::firstOrCreate(
-            ['playlist_id' => $playlist->id, 'source_category_id' => $sourceCategoryId],
-            [
-                'name' => $sourceCategoryName,
-                'name_internal' => $sourceCategoryName,
-                'user_id' => $playlist->user_id,
-            ]
-        );
-
-        // Create the streams
-        foreach ($seriesStreams as $item) {
-            // Normalize the name — some providers omit it which violates the DB NOT NULL constraint
+        // --- Phase 1: parse the HTTP response into plain PHP arrays (no DB writes) ---
+        $rawItems = [];
+        foreach (Items::fromString($seriesStreamsResponse->body()) as $item) {
             $itemName = trim((string) ($item->name ?? $item->title ?? ''));
             if ($itemName === '') {
                 continue;
             }
 
-            // Check if we already have this series in the playlist
-            $existingSeries = $playlist->series()
-                ->where('source_series_id', $item->series_id)
-                ->where('source_category_id', $sourceCategoryId)
-                ->first();
-
             $lastModified = isset($item->last_modified) && $item->last_modified
                 ? Carbon::createFromTimestamp((int) $item->last_modified)->toDateTimeString()
                 : null;
 
-            if ($existingSeries) {
-                if ($lastModified) {
-                    $existingSeries->update(['last_modified' => $lastModified]);
-                }
-
-                continue;
-            }
-
-            $bulk[] = [
-                'enabled' => $this->autoEnable, // Disable the series by default
+            $rawItems[] = [
                 'name' => $itemName,
                 'source_series_id' => $item->series_id,
-                'source_category_id' => $sourceCategoryId,
-                'import_batch_no' => $this->batchNo,
-                'user_id' => $playlist->user_id,
-                'playlist_id' => $playlist->id,
-                'category_id' => $category->id,
+                'last_modified' => $lastModified,
                 'sort' => $item->num ?? null,
                 'cover' => $item->cover ?? null,
                 'plot' => $item->plot ?? null,
                 'genre' => $item->genre ?? null,
                 'release_date' => $item->releaseDate ?? $item->release_date ?? null,
                 'cast' => $item->cast ?? null,
-                'director' => $item->director,
+                'director' => $item->director ?? null,
                 'rating' => $item->rating ?? null,
                 'rating_5based' => (float) ($item->rating_5based ?? 0),
                 'backdrop_path' => json_encode($item->backdrop_path ?? []),
                 'youtube_trailer' => $item->youtube_trailer ?? null,
-                'last_modified' => $lastModified,
             ];
+        }
+
+        // --- Phase 2: identify which series already exist (read-only, outside transaction) ---
+        $existingSeriesIds = $playlist->series()
+            ->where('source_category_id', $sourceCategoryId)
+            ->pluck('last_modified', 'source_series_id');
+
+        $toUpdate = [];
+        $toInsert = [];
+        foreach ($rawItems as $raw) {
+            $existing = $existingSeriesIds->get($raw['source_series_id']);
+            if ($existing !== null) {
+                // Only queue an update if last_modified actually changed
+                if ($raw['last_modified'] && $raw['last_modified'] !== $existing) {
+                    $toUpdate[] = ['source_series_id' => $raw['source_series_id'], 'last_modified' => $raw['last_modified']];
+                }
+            } else {
+                $toInsert[] = $raw;
+            }
+        }
+
+        // Apply last_modified updates for existing series (simple row updates, no FK risk)
+        foreach ($toUpdate as $upd) {
+            $playlist->series()
+                ->where('source_series_id', $upd['source_series_id'])
+                ->where('source_category_id', $sourceCategoryId)
+                ->update(['last_modified' => $upd['last_modified']]);
         }
 
         // Update progress: scale 0→99 across all chunks using index position
@@ -176,14 +172,70 @@ class ProcessM3uImportSeriesChunk implements ShouldQueue
             'series_progress' => min(99, $chunkProgress),
         ]);
 
-        // Bulk insert the series in chunks with logging on failure
-        collect($bulk)->chunk(100)->each(function ($chunk) {
+        if (empty($toInsert)) {
+            return;
+        }
+
+        // --- Phase 3: ensure category exists and bulk-insert new series atomically ---
+        // Wrapped in a transaction with 5 deadlock-retry attempts.
+        // The category is created (or fetched) inside the transaction with import_batch_no
+        // so that a concurrent sync's seriesCleanup cannot delete it while we hold the
+        // transaction lock — preventing the series_category_id_foreign FK violation.
+        $playlistId = $playlist->id;
+        $userId = $playlist->user_id;
+        $batchNo = $this->batchNo;
+        $autoEnable = $this->autoEnable;
+
+        collect($toInsert)->chunk(100)->each(function ($chunk) use (
+            $playlistId, $userId, $batchNo, $sourceCategoryId, $sourceCategoryName, $autoEnable
+        ) {
             try {
-                Series::insertOrIgnore($chunk->toArray());
-            } catch (\Throwable $e) {
+                DB::transaction(function () use (
+                    $chunk, $playlistId, $userId, $batchNo,
+                    $sourceCategoryId, $sourceCategoryName, $autoEnable
+                ) {
+                    // Get or create the category inside the transaction so the row exists
+                    // for the duration of the insert. Include import_batch_no so cleanup
+                    // queries (import_batch_no != $batchNo) leave this category alone.
+                    $category = Category::firstOrCreate(
+                        ['playlist_id' => $playlistId, 'source_category_id' => $sourceCategoryId],
+                        [
+                            'name' => $sourceCategoryName,
+                            'name_internal' => $sourceCategoryName,
+                            'user_id' => $userId,
+                            'import_batch_no' => $batchNo,
+                        ]
+                    );
+
+                    $rows = $chunk->map(fn ($raw) => array_merge($raw, [
+                        'enabled' => $autoEnable,
+                        'source_category_id' => $sourceCategoryId,
+                        'import_batch_no' => $batchNo,
+                        'user_id' => $userId,
+                        'playlist_id' => $playlistId,
+                        'category_id' => $category->id,
+                    ]))->toArray();
+
+                    Series::insertOrIgnore($rows);
+                }, 5);
+            } catch (QueryException $e) {
+                // SQLSTATE 23503 = foreign_key_violation (PostgreSQL).
+                // This can occur when a concurrent sync's seriesCleanup deletes the
+                // category between our transaction retries. Log and skip — the series
+                // will be picked up on the next successful sync.
+                if ($e->getCode() === '23503') {
+                    Log::warning('Series bulk insert skipped: category deleted by concurrent sync', [
+                        'source_category_id' => $sourceCategoryId,
+                        'playlist_id' => $playlistId,
+                        'error' => $e->getMessage(),
+                    ]);
+
+                    return;
+                }
+
                 Log::error('Series bulk insert failed', [
                     'exception' => $e->getMessage(),
-                    'chunk' => $chunk->toArray(),
+                    'source_category_id' => $sourceCategoryId,
                 ]);
 
                 throw $e;
