@@ -47,6 +47,14 @@ class ResetSyncProcess extends Command
         $this->call('queue:clear', [
             '--force' => true,
         ]);
+        $this->call('queue:clear', [
+            '--queue' => 'import',
+            '--force' => true,
+        ]);
+        $this->call('queue:clear', [
+            '--queue' => 'file_sync',
+            '--force' => true,
+        ]);
 
         foreach ($hungPlaylists->cursor() as $playlist) {
             $this->info("🔄 Resetting stuck Playlist(s): {$playlist->name}");
