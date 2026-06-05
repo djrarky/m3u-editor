@@ -34,10 +34,7 @@ class ResetSyncProcess extends Command
      */
     public function handle()
     {
-        $hungPlaylists = Playlist::where('status', '!=', Status::Completed)
-            ->whereDoesntHave('syncRuns', function ($q) {
-                $q->where('status', SyncRunStatus::Running->value);
-            });
+        $hungPlaylists = Playlist::where('status', '!=', Status::Completed);
         $hungEpgs = Epg::where('status', '!=', Status::Completed);
 
         if ($hungPlaylists->count() === 0 && $hungEpgs->count() === 0) {
@@ -53,6 +50,15 @@ class ResetSyncProcess extends Command
 
         foreach ($hungPlaylists->cursor() as $playlist) {
             $this->info("🔄 Resetting stuck Playlist(s): {$playlist->name}");
+
+            // Fail any stale Running SyncRuns so startImport() creates a fresh run
+            // rather than attaching to the stale one and silently skipping the import.
+            $playlist->syncRuns()
+                ->where('status', SyncRunStatus::Running->value)
+                ->update([
+                    'status' => SyncRunStatus::Failed->value,
+                    'finished_at' => now(),
+                ]);
 
             // Restart the sync process
             if ($playlist->auto_sync) {
