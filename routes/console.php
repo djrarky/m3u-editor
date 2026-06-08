@@ -1,6 +1,5 @@
 <?php
 
-use App\Models\PluginRun;
 use Illuminate\Support\Facades\Schedule;
 
 /*

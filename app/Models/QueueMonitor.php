@@ -5,8 +5,8 @@ namespace App\Models;
 use Illuminate\Contracts\Queue\Job as JobContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\MassPrunable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Hash;
 
 class QueueMonitor extends Model
