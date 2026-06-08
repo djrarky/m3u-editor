@@ -6,12 +6,12 @@ use Illuminate\Contracts\Queue\Job as JobContract;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Prunable;
+use Illuminate\Database\Eloquent\MassPrunable;
 use Illuminate\Support\Facades\Hash;
 
 class QueueMonitor extends Model
 {
-    use Prunable;
+    use MassPrunable;
 
     protected $table = 'queue_monitor';
 
