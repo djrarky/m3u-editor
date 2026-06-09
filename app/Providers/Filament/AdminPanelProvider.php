@@ -172,10 +172,16 @@ class AdminPanelProvider extends PanelProvider
                 return $builder
                     ->items([
                         ...CustomDashboard::getNavigationItems(),
-                        ...Preferences::getNavigationItems(),
-                        ...UserResource::getNavigationItems(),
                     ])
                     ->groups([
+                        ...($this->isAdmin() ? [
+                            NavigationGroup::make(fn () => __('Administration'))
+                                ->icon('heroicon-s-shield-check')
+                                ->items([
+                                    ...UserResource::getNavigationItems(),
+                                    ...Preferences::getNavigationItems(),
+                                ]),
+                        ] : []),
                         NavigationGroup::make(fn () => __('Playlist'))
                             ->icon('heroicon-m-play-pause')
                             ->items([
