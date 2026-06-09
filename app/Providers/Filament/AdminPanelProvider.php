@@ -252,7 +252,7 @@ class AdminPanelProvider extends PanelProvider
                                     ->url('/docs/api', shouldOpenInNewTab: true)
                                     ->sort(9)
                                     ->icon(null)
-                                    ->visible(fn (): bool => auth()->user()?->isAdmin() ?? false),
+                                    ->visible($this->isAdmin(...)),
                             ]),
                     ]);
             })
@@ -273,7 +273,7 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->plugins(array_filter([
                 FilamentSpatieLaravelBackupPlugin::make()
-                    ->authorize(fn (): bool => auth()->user()->isAdmin())
+                    ->authorize($this->isAdmin(...))
                     ->usingPage(Backups::class),
                 FilamentLanguageSwitcherPlugin::make()
                     ->locales([
@@ -348,7 +348,7 @@ class AdminPanelProvider extends PanelProvider
         if ($settings['show_queue_indicator'] ?? true) {
             FilamentView::registerRenderHook(
                 PanelsRenderHook::USER_MENU_BEFORE, // Place it before the user menu
-                fn (): string => auth()->user()?->isAdmin() ? view('components.queue-indicator')->render() : '',
+                fn (): string => $this->isAdmin() ? view('components.queue-indicator')->render() : '',
             );
         }
 
@@ -371,6 +371,11 @@ class AdminPanelProvider extends PanelProvider
 
         // Return the configured panel
         return $adminPanel;
+    }
+
+    private function isAdmin(): bool
+    {
+        return auth()->user()?->isAdmin() ?? false;
     }
 
     /**
