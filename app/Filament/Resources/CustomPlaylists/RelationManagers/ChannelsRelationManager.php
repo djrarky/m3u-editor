@@ -4,6 +4,7 @@ namespace App\Filament\Resources\CustomPlaylists\RelationManagers;
 
 use App\Facades\SortFacade;
 use App\Filament\Resources\Channels\ChannelResource;
+use App\Filament\Resources\CustomPlaylists\RelationManagers\Concerns\ReordersCustomPlaylistPivotSort;
 use App\Jobs\SyncPlexDvrJob;
 use App\Models\Channel;
 use Filament\Actions\AttachAction;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\DB;
 
 class ChannelsRelationManager extends RelationManager
 {
+    use ReordersCustomPlaylistPivotSort;
+
     protected static string $relationship = 'channels';
 
     protected static ?string $label = 'Live Channels';

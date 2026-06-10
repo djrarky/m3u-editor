@@ -87,7 +87,8 @@ class CustomPlaylist extends Model
 
     public function series(): BelongsToMany
     {
-        return $this->belongsToMany(Series::class, 'series_custom_playlist');
+        return $this->belongsToMany(Series::class, 'series_custom_playlist')
+            ->withPivot(['sort']);
     }
 
     public function enabled_series(): BelongsToMany
