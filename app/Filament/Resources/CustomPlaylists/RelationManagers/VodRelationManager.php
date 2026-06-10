@@ -430,7 +430,16 @@ class VodRelationManager extends RelationManager
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
-        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
+        $vodChannelIds = $ownerRecord->channels()->where('is_vod', true)->select('channels.id');
+        $tags = $ownerRecord->tags()
+            ->where('type', $ownerRecord->uuid)
+            ->whereIn('id', function ($query) use ($vodChannelIds) {
+                $query->select('tag_id')
+                    ->from('taggables')
+                    ->where('taggable_type', Channel::class)
+                    ->whereIn('taggable_id', $vodChannelIds);
+            })
+            ->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
                 ->modifyQueryUsing(fn ($query) => $query->where('is_vod', true)->whereHas('tags', function ($tagQuery) use ($tag) {

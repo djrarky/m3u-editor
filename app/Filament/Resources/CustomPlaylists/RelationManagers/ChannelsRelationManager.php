@@ -441,7 +441,16 @@ class ChannelsRelationManager extends RelationManager
     {
         // Lets group the tabs by Custom Playlist tags
         $ownerRecord = $this->ownerRecord;
-        $tags = $ownerRecord->tags()->where('type', $ownerRecord->uuid)->get();
+        $liveChannelIds = $ownerRecord->channels()->where('is_vod', false)->select('channels.id');
+        $tags = $ownerRecord->tags()
+            ->where('type', $ownerRecord->uuid)
+            ->whereIn('id', function ($query) use ($liveChannelIds) {
+                $query->select('tag_id')
+                    ->from('taggables')
+                    ->where('taggable_type', Channel::class)
+                    ->whereIn('taggable_id', $liveChannelIds);
+            })
+            ->get();
         $tabs = $tags->map(
             fn ($tag) => Tab::make($tag->name)
                 ->modifyQueryUsing(fn ($query) => $query->where('is_vod', false)->whereHas('tags', function ($tagQuery) use ($tag) {

@@ -25,6 +25,7 @@ use App\Models\Channel;
 use App\Models\CustomPlaylist;
 use App\Models\Group;
 use App\Models\Playlist;
+use App\Models\Series;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -238,17 +239,17 @@ it('lists custom playlist groups by order_column', function () {
 it('preserves existing series pivot sort slots when reordering custom playlist series', function () {
     $this->actingAs($this->user);
 
-    $seriesA = \App\Models\Series::factory()->for($this->user)->for($this->playlist)->create([
+    $seriesA = Series::factory()->for($this->user)->for($this->playlist)->create([
         'enabled' => true,
         'sort' => 1,
         'name' => 'Series A',
     ]);
-    $seriesB = \App\Models\Series::factory()->for($this->user)->for($this->playlist)->create([
+    $seriesB = Series::factory()->for($this->user)->for($this->playlist)->create([
         'enabled' => true,
         'sort' => 2,
         'name' => 'Series B',
     ]);
-    $seriesC = \App\Models\Series::factory()->for($this->user)->for($this->playlist)->create([
+    $seriesC = Series::factory()->for($this->user)->for($this->playlist)->create([
         'enabled' => true,
         'sort' => 3,
         'name' => 'Series C',

@@ -152,7 +152,9 @@ class SeriesRelationManager extends RelationManager
             })
             ->paginated([10, 25, 50, 100])
             ->defaultPaginationPageOption(25)
-            ->defaultSort(fn (Builder $query, string $direction): Builder => $query->orderByRaw("COALESCE(series_custom_playlist.sort, series.sort) {$direction}"))
+            ->defaultSort(fn (Builder $query, string $direction): Builder => $query->orderByRaw(
+                'COALESCE(series_custom_playlist.sort, series.sort) '.($direction === 'desc' ? 'desc' : 'asc')
+            ))
             ->reorderable('series_custom_playlist.sort')
             ->columns($defaultColumns)
             ->filters([
