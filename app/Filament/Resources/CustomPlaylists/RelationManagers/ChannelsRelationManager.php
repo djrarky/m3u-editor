@@ -177,7 +177,6 @@ class ChannelsRelationManager extends RelationManager
         array_splice($defaultColumns, 12, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
-            ->persistFiltersInSession()
             ->persistSortInSession()
             ->recordTitleAttribute('title')
             ->filtersTriggerAction(function ($action) {
@@ -271,7 +270,6 @@ class ChannelsRelationManager extends RelationManager
                             ->getOptionLabelFromRecordUsing(function ($record) {
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),

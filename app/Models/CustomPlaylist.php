@@ -248,11 +248,8 @@ class CustomPlaylist extends Model
     {
         return Attribute::make(
             get: function ($value) {
-                if ($value) {
-                    // Check playlist user has access to proxy features
-                    if (! $this->user?->canUseProxy()) {
-                        return false;
-                    }
+                if ($value && ! $this->user?->canUseProxy()) {
+                    return false;
                 }
 
                 return $value;

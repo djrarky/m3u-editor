@@ -176,7 +176,6 @@ class VodRelationManager extends RelationManager
         array_splice($defaultColumns, 14, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
-            ->persistFiltersInSession()
             ->persistSortInSession()
             ->recordTitleAttribute('title')
             ->filtersTriggerAction(function ($action) {
@@ -268,7 +267,6 @@ class VodRelationManager extends RelationManager
                             ->getOptionLabelFromRecordUsing(function ($record) {
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),

@@ -142,7 +142,6 @@ class SeriesRelationManager extends RelationManager
         array_splice($defaultColumns, 7, 0, [$groupColumn]);
 
         return $table->persistFiltersInSession()
-            ->persistFiltersInSession()
             ->persistSortInSession()
             ->recordTitleAttribute('name')
             ->filtersTriggerAction(function ($action) {
@@ -216,7 +215,6 @@ class SeriesRelationManager extends RelationManager
                             ->getOptionLabelFromRecordUsing(function ($record) {
                                 $displayTitle = $record->title_custom ?: $record->title;
                                 $playlistName = $record->getEffectivePlaylist()->name ?? 'Unknown';
-                                $options[$record->id] = "{$displayTitle} [{$playlistName}]";
 
                                 return "{$displayTitle} [{$playlistName}]";
                             }),
@@ -319,7 +317,7 @@ class SeriesRelationManager extends RelationManager
                 ->badge($ownerRecord->series()->withAnyTags([$tag], $tag->type)->count())
         )->toArray();
 
-        // Add an "All" tab to show all channels
+        // Add an "All" tab to show all series
         array_unshift(
             $tabs,
             Tab::make(__('All'))
