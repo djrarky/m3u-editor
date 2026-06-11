@@ -37,7 +37,7 @@ class ViewCustomPlaylist extends ViewRecord
     {
         $extraLinks = [];
         if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $extraLinks[] = Livewire::make(MediaFlowProxyUrl::class);
+            $extraLinks[] = Livewire::make(MediaFlowProxyUrl::class, ['section' => 'links']);
         }
         $extraLinks[] = Livewire::make(PlaylistEpgUrl::class);
 
@@ -76,9 +76,12 @@ class ViewCustomPlaylist extends ViewRecord
                             ->schema([
                                 Section::make()
                                     ->columns(1)
-                                    ->schema([
+                                    ->schema(array_filter([
                                         Livewire::make(XtreamApiInfo::class),
-                                    ]),
+                                        PlaylistFacade::mediaFlowProxyEnabled()
+                                            ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
+                                            : null,
+                                    ])),
                             ]),
                     ])->contained(false),
                 Livewire::make(EpgViewer::class)

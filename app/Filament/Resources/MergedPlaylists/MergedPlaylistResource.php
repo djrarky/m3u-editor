@@ -8,10 +8,10 @@ use App\Filament\Resources\MergedPlaylistResource\Pages;
 use App\Filament\Resources\MergedPlaylists\Pages\EditMergedPlaylist;
 use App\Filament\Resources\MergedPlaylists\Pages\ListMergedPlaylists;
 use App\Filament\Resources\MergedPlaylists\RelationManagers\PlaylistsRelationManager;
-use App\Forms\Components\MediaFlowProxyUrl;
 use App\Forms\Components\PlaylistEpgUrl;
 use App\Forms\Components\PlaylistM3uUrl;
 use App\Forms\Components\XtreamApiInfo;
+use App\Livewire\MediaFlowProxyUrl;
 use App\Models\MergedPlaylist;
 use App\Models\PlaylistAuth;
 use App\Models\StreamProfile;
@@ -33,6 +33,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Group as ComponentsGroup;
+use Filament\Schemas\Components\Livewire;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -468,10 +469,8 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->dehydrated(false), // don't save the value in the database
         ];
         if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $urls[] = MediaFlowProxyUrl::make('mediaflow_proxy_url')
-                ->label(__('Proxied M3U URL'))
-                ->columnSpan(1)
-                ->dehydrated(false); // don't save the value in the database
+            $urls[] = Livewire::make(MediaFlowProxyUrl::class, ['section' => 'links'])
+                ->columnSpan(1);
         }
 
         return [
@@ -604,7 +603,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                             Tab::make(__('Xtream API'))
                                 ->columns(2)
                                 ->icon('heroicon-m-bolt')
-                                ->schema([
+                                ->schema(array_filter([
                                     Section::make(__('Xtream API'))
                                         ->compact()
                                         ->description(__('Xtream API connection details.'))
@@ -616,7 +615,10 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                                 ->columnSpan(2)
                                                 ->dehydrated(false), // don't save the value in the database
                                         ]),
-                                ]),
+                                    PlaylistFacade::mediaFlowProxyEnabled()
+                                        ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
+                                        : null,
+                                ])),
 
                             Tab::make(__('Output'))
                                 ->columns(2)

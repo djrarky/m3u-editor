@@ -701,7 +701,7 @@ class PlaylistResource extends Resource implements CopilotResource
     {
         $extraLinks = [];
         if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $extraLinks[] = Livewire::make(MediaFlowProxyUrl::class);
+            $extraLinks[] = Livewire::make(MediaFlowProxyUrl::class, ['section' => 'links']);
         }
         $extraLinks[] = Livewire::make(PlaylistEpgUrl::class);
 
@@ -740,10 +740,13 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->schema([
                                 Section::make()
                                     ->columns(1)
-                                    ->schema([
+                                    ->schema(array_filter([
                                         Livewire::make(XtreamApiInfo::class),
                                         Livewire::make(XtreamDnsStatus::class),
-                                    ]),
+                                        PlaylistFacade::mediaFlowProxyEnabled()
+                                            ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
+                                            : null,
+                                    ])),
                             ]),
                     ])->contained(false),
                 Livewire::make(EpgViewer::class)

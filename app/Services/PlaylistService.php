@@ -215,12 +215,13 @@ class PlaylistService
     /**
      * Get the media flow proxy URLs for the given playlist
      *
-     * @param  Playlist|MergedPlaylist|CustomPlaylist  $playlist
-     * @return array
+     * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
+     * @return array{m3u: string, epg: string, xtream: array{server: string, username: string, password: string}|null, authEnabled: bool}
      */
     public function getMediaFlowProxyUrls($playlist)
     {
         // Get the first enabled auth (URLs can only contain one set of credentials)
+        $playlistAuth = null;
         if (method_exists($playlist, 'playlistAuths')) {
             $playlistAuth = $playlist->playlistAuths()->where('enabled', true)->first();
         } elseif ($playlist instanceof PlaylistAlias) {
@@ -231,7 +232,7 @@ class PlaylistService
         }
         $auth = '';
         if ($playlistAuth) {
-            $auth = '?username='.$playlistAuth->username.'&password='.$playlistAuth->password;
+            $auth = '?username='.urlencode($playlistAuth->username).'&password='.urlencode($playlistAuth->password);
         }
 
         $settings = $this->getMediaFlowSettings();
@@ -240,9 +241,9 @@ class PlaylistService
             $proxyUrl .= ':'.$settings['mediaflow_proxy_port'];
         }
 
-        // Example structure: http://localhost:8888/proxy/hls/manifest.m3u8?d=YOUR_M3U_EDITOR_PLAYLIST_URL&api_password=YOUR_PROXY_API_PASSWORD
-        $playlistRoute = route('playlist.generate', ['uuid' => $playlist->uuid]);
-        $playlistRoute .= $auth;
+        // M3U URL: /proxy/hls/manifest.m3u8?d={playlistUrl}&api_password={password}
+        // The inner playlist URL is urlencode()'d so its own query params don't pollute the outer query string.
+        $playlistRoute = route('playlist.generate', ['uuid' => $playlist->uuid]).$auth;
         $m3uUrl = $proxyUrl.'/proxy/hls/manifest.m3u8?d='.urlencode($playlistRoute);
 
         // Check if we're adding user-agent headers
@@ -253,10 +254,48 @@ class PlaylistService
         }
         $m3uUrl .= '&api_password='.$settings['mediaflow_proxy_password'];
 
-        // Return the results
+        // EPG URL: /proxy/epg?d={epgUrl}&api_password={password}
+        // EPG is resolved by UUID only; no auth query params needed.
+        $epgRoute = route('epg.generate', ['uuid' => $playlist->uuid]);
+        $epgUrl = $proxyUrl.'/proxy/epg?d='.urlencode($epgRoute).'&api_password='.$settings['mediaflow_proxy_password'];
+
+        // Xtream Codes proxy credentials — mirrors getXtreamInfo() structure.
+        // Format: username = base64("{app_url}:{xtream_username}:{mediaflow_api_password}"), password = xtream_password
+        $appUrl = rtrim(url('/'), '/');
+        $mfApiPassword = $settings['mediaflow_proxy_password'];
+
+        // Default credentials match getXtreamInfo(): user->name + uuid, or alias overrides if set.
+        $defaultXtreamUsername = $playlist->user->name;
+        $defaultXtreamPassword = $playlist->uuid;
+        if ($playlist instanceof PlaylistAlias && $playlist->username && $playlist->password) {
+            $defaultXtreamUsername = $playlist->username;
+            $defaultXtreamPassword = $playlist->password;
+        }
+
+        $xtream = [
+            'server' => $proxyUrl,
+            'default' => [
+                'username' => base64_encode("{$appUrl}:{$defaultXtreamUsername}:{$mfApiPassword}"),
+                'password' => $defaultXtreamPassword,
+            ],
+            'auths' => [],
+        ];
+
+        if (method_exists($playlist, 'playlistAuths')) {
+            foreach ($playlist->playlistAuths as $auth) {
+                $xtream['auths'][] = [
+                    'name' => $auth->name,
+                    'username' => base64_encode("{$appUrl}:{$auth->username}:{$mfApiPassword}"),
+                    'password' => $auth->password,
+                ];
+            }
+        }
+
         return [
             'm3u' => $m3uUrl,
-            'authEnabled' => $playlistAuth ? true : false,
+            'epg' => $epgUrl,
+            'xtream' => $xtream,
+            'authEnabled' => (bool) $playlistAuth,
         ];
     }
 

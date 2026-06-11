@@ -863,13 +863,171 @@ class Preferences extends SettingsPage
                                             ->step(1)
                                             ->helperText(__('Maximum number of players that can be open at once.')),
                                     ]),
-                                Section::make(__('MediaFlow Proxy'))
-                                    ->description(__('If you have MediaFlow Proxy installed, you can use it to proxy your m3u editor playlist streams. When enabled, the app will auto-generate URLs for you to use via MediaFlow Proxy.'))
-                                    ->columnSpan('full')
-                                    ->columns(3)
-                                    ->collapsible()
-                                    ->collapsed(true)
+                            ]),
+
+                        Tab::make(__('Integrations'))
+                            ->schema([
+                                Section::make(__('TMDB Integration'))
+                                    ->description(__('Configure The Movie Database (TMDB) integration to automatically lookup and populate metadata IDs (TMDB, TVDB, IMDB) for your VOD content and Series.'))
+                                    ->columnSpanFull()
+                                    ->icon('heroicon-m-film')
+                                    ->columns(2)
                                     ->headerActions([
+                                        Action::make('test_tmdb_connection')
+                                            ->label(__('Test Connection'))
+                                            ->icon('heroicon-o-signal')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->action(function ($get): void {
+                                                $apiKey = $get('tmdb_api_key');
+                                                if (empty($apiKey)) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('API Key Required'))
+                                                        ->body(__('Please enter a TMDB API key to test the connection.'))
+                                                        ->send();
+
+                                                    return;
+                                                }
+
+                                                try {
+                                                    $response = Http::timeout(10)->get('https://api.themoviedb.org/3/configuration', [
+                                                        'api_key' => $apiKey,
+                                                    ]);
+
+                                                    if ($response->successful()) {
+                                                        Notification::make()
+                                                            ->success()
+                                                            ->title(__('Connection Successful'))
+                                                            ->body(__('Successfully connected to TMDB API!'))
+                                                            ->send();
+                                                    } else {
+                                                        $error = $response->json('status_message', 'Unknown error');
+                                                        Notification::make()
+                                                            ->danger()
+                                                            ->title(__('Connection Failed'))
+                                                            ->body("TMDB API returned an error: {$error}")
+                                                            ->send();
+                                                    }
+                                                } catch (Exception $e) {
+                                                    Notification::make()
+                                                        ->danger()
+                                                        ->title(__('Connection Failed'))
+                                                        ->body('Could not connect to TMDB API: '.$e->getMessage())
+                                                        ->send();
+                                                }
+                                            }),
+                                        Action::make('get_tmdb_api_key')
+                                            ->label(__('Get API Key'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->size('sm')
+                                            ->url('https://www.themoviedb.org/settings/api')
+                                            ->openUrlInNewTab(true),
+                                    ])
+                                    ->schema([
+                                        TextInput::make('tmdb_api_key')
+                                            ->label(__('TMDB API Key'))
+                                            ->placeholder(__('Enter your TMDB API Key (v3 auth)'))
+                                            ->password()
+                                            ->revealable()
+                                            ->helperText(__('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.')),
+                                        Select::make('tmdb_language')
+                                            ->label(__('Search Language'))
+                                            ->searchable()
+                                            ->options([
+                                                'en-US' => 'English (US)',
+                                                'en-GB' => 'English (UK)',
+                                                'de-DE' => 'German',
+                                                'fr-FR' => 'French',
+                                                'es-ES' => 'Spanish (Spain)',
+                                                'es-MX' => 'Spanish (Mexico)',
+                                                'it-IT' => 'Italian',
+                                                'pt-PT' => 'Portuguese',
+                                                'pt-BR' => 'Portuguese (Brazil)',
+                                                'nl-NL' => 'Dutch',
+                                                'pl-PL' => 'Polish',
+                                                'ru-RU' => 'Russian',
+                                                'ja-JP' => 'Japanese',
+                                                'ko-KR' => 'Korean',
+                                                'zh-CN' => 'Chinese (Simplified)',
+                                                'zh-TW' => 'Chinese (Traditional)',
+                                                'ar-SA' => 'Arabic',
+                                                'tr-TR' => 'Turkish',
+                                                'sv-SE' => 'Swedish',
+                                                'da-DK' => 'Danish',
+                                                'fi-FI' => 'Finnish',
+                                                'no-NO' => 'Norwegian',
+                                            ])
+                                            ->default('en-US')
+                                            ->helperText(__('Preferred language for TMDB searches.')),
+                                        Toggle::make('tmdb_auto_lookup_on_import')
+                                            ->label(__('Auto-lookup on metadata fetch'))
+                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists.'))
+                                            ->live()
+                                            ->default(false),
+                                        Toggle::make('tmdb_auto_create_groups')
+                                            ->label(__('Auto-create groups/categories from TMDB genres'))
+                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
+                                            ->default(false),
+                                        Fieldset::make(__('TMDB Auto-lookup Settings'))
+                                            ->columnSpanFull()
+                                            ->schema([
+                                                ToggleButtons::make('tmdb_auto_lookup_all_new')
+                                                    ->options([
+                                                        'enabled' => __('Only enabled'),
+                                                        'new' => __('All new'),
+                                                        'both' => __('Both'),
+                                                    ])
+                                                    ->icons([
+                                                        'enabled' => 'heroicon-s-check',
+                                                        'new' => 'heroicon-s-plus',
+                                                        'both' => 'heroicon-s-squares-plus',
+                                                    ])
+                                                    ->colors([
+                                                        'enabled' => 'success',
+                                                        'new' => 'primary',
+                                                        'both' => 'primary',
+                                                    ])
+                                                    ->columnSpanFull()
+                                                    ->grouped()
+                                                    ->label(__('Auto-lookup scope'))
+                                                    ->helperText(__('Whether to automatically lookup TMDB IDs for all new VOD and Series, or only those that are enabled (default), or both.'))
+                                                    ->default('enabled'),
+                                            ])->hidden(fn (Get $get): bool => ! (bool) $get('tmdb_auto_lookup_on_import')),
+                                        TextInput::make('tmdb_rate_limit')
+                                            ->label(__('Rate Limit (requests/second)'))
+                                            ->placeholder(__('40'))
+                                            ->numeric()
+                                            ->minValue(1)
+                                            ->maxValue(50)
+                                            ->default(40)
+                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
+                                        TextInput::make('tmdb_confidence_threshold')
+                                            ->label(__('Match Confidence Threshold (%)'))
+                                            ->placeholder(__('80'))
+                                            ->numeric()
+                                            ->minValue(50)
+                                            ->maxValue(100)
+                                            ->default(80)
+                                            ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
+                                    ]),
+
+                                Section::make(__('MediaFlow Proxy'))
+                                    ->description(__('Connect MediaFlow Proxy to route your playlists, EPG, and Xtream API through it. Once configured, proxied URLs are auto-generated on each playlist\'s detail page.'))
+                                    ->columnSpan('full')
+                                    ->icon('heroicon-m-shield-check')
+                                    ->columns(3)
+                                    ->headerActions([
+                                        Action::make('mfproxy_docs')
+                                            ->label(__('Docs'))
+                                            ->icon('heroicon-o-arrow-top-right-on-square')
+                                            ->iconPosition('after')
+                                            ->color('gray')
+                                            ->size('sm')
+                                            ->url('https://mhdzumair.github.io/mediaflow-proxy/')
+                                            ->openUrlInNewTab(true),
                                         Action::make('mfproxy_git')
                                             ->label(__('GitHub'))
                                             ->icon('heroicon-o-arrow-top-right-on-square')
@@ -883,31 +1041,28 @@ class Preferences extends SettingsPage
                                         TextInput::make('mediaflow_proxy_url')
                                             ->label(__('Proxy URL'))
                                             ->columnSpan(1)
-                                            ->placeholder(__('socks5://user:pass@host:port or http://user:pass@host:port')),
+                                            ->placeholder(__('http://your-mediaflow-host:8888')),
                                         TextInput::make('mediaflow_proxy_port')
                                             ->label(__('Proxy Port (Alternative)'))
                                             ->numeric()
                                             ->columnSpan(1)
-                                            ->helperText(__('Alternative port if not specified in URL. Not commonly used.')),
-
+                                            ->helperText(__('Alternative port if not specified in the URL above.')),
                                         TextInput::make('mediaflow_proxy_password')
-                                            ->label(__('Proxy Password (Alternative)'))
+                                            ->label(__('API Password'))
                                             ->columnSpan(1)
                                             ->password()
                                             ->revealable()
-                                            ->helperText(__('Alternative password if not specified in URL. Not commonly used.')),
+                                            ->helperText(__('The API_PASSWORD configured on your MediaFlow Proxy instance.')),
                                         Toggle::make('mediaflow_proxy_playlist_user_agent')
-                                            ->label(__('Use playlist user agent'))
+                                            ->label(__('Use Proxy User Agent for Playlists (M3U8/MPD)'))
                                             ->inline(false)
                                             ->live()
-                                            ->label(__('Use Proxy User Agent for Playlists (M3U8/MPD)'))
                                             ->helperText(__('If enabled, the User Agent will also be used for fetching playlist files. Otherwise, the default FFmpeg User Agent is used for playlists.')),
                                         TextInput::make('mediaflow_proxy_user_agent')
                                             ->label(__('Proxy User Agent for Media Streams'))
                                             ->placeholder(__('VLC/3.0.21 LibVLC/3.0.21'))
                                             ->columnSpan(2),
                                     ]),
-
                             ]),
 
                         Tab::make(__('Sync Options'))
@@ -1292,155 +1447,6 @@ class Preferences extends SettingsPage
                                             ->placeholder(__('Enter SMTP From Address'))
                                             ->email()
                                             ->helperText(__('The "From" email address for outgoing emails. Defaults to no-reply@m3u-editor.dev.')),
-                                    ]),
-                            ]),
-                        Tab::make(__('TMDB'))
-                            ->columns(2)
-                            ->schema([
-                                Section::make(__('TMDB Integration'))
-                                    ->description(__('Configure The Movie Database (TMDB) integration to automatically lookup and populate metadata IDs (TMDB, TVDB, IMDB) for your VOD content and Series.'))
-                                    ->columnSpanFull()
-                                    ->columns(2)
-                                    ->headerActions([
-                                        Action::make('test_tmdb_connection')
-                                            ->label(__('Test Connection'))
-                                            ->icon('heroicon-o-signal')
-                                            ->iconPosition('after')
-                                            ->color('gray')
-                                            ->size('sm')
-                                            ->action(function ($get): void {
-                                                $apiKey = $get('tmdb_api_key');
-                                                if (empty($apiKey)) {
-                                                    Notification::make()
-                                                        ->danger()
-                                                        ->title(__('API Key Required'))
-                                                        ->body(__('Please enter a TMDB API key to test the connection.'))
-                                                        ->send();
-
-                                                    return;
-                                                }
-
-                                                try {
-                                                    $response = Http::timeout(10)->get('https://api.themoviedb.org/3/configuration', [
-                                                        'api_key' => $apiKey,
-                                                    ]);
-
-                                                    if ($response->successful()) {
-                                                        Notification::make()
-                                                            ->success()
-                                                            ->title(__('Connection Successful'))
-                                                            ->body(__('Successfully connected to TMDB API!'))
-                                                            ->send();
-                                                    } else {
-                                                        $error = $response->json('status_message', 'Unknown error');
-                                                        Notification::make()
-                                                            ->danger()
-                                                            ->title(__('Connection Failed'))
-                                                            ->body("TMDB API returned an error: {$error}")
-                                                            ->send();
-                                                    }
-                                                } catch (Exception $e) {
-                                                    Notification::make()
-                                                        ->danger()
-                                                        ->title(__('Connection Failed'))
-                                                        ->body('Could not connect to TMDB API: '.$e->getMessage())
-                                                        ->send();
-                                                }
-                                            }),
-                                        Action::make('get_tmdb_api_key')
-                                            ->label(__('Get API Key'))
-                                            ->icon('heroicon-o-arrow-top-right-on-square')
-                                            ->iconPosition('after')
-                                            ->size('sm')
-                                            ->url('https://www.themoviedb.org/settings/api')
-                                            ->openUrlInNewTab(true),
-                                    ])
-                                    ->schema([
-                                        TextInput::make('tmdb_api_key')
-                                            ->label(__('TMDB API Key'))
-                                            ->placeholder(__('Enter your TMDB API Key (v3 auth)'))
-                                            ->password()
-                                            ->revealable()
-                                            ->helperText(__('Your TMDB API key (v3 auth). You can get one for free at themoviedb.org.')),
-                                        Select::make('tmdb_language')
-                                            ->label(__('Search Language'))
-                                            ->searchable()
-                                            ->options([
-                                                'en-US' => 'English (US)',
-                                                'en-GB' => 'English (UK)',
-                                                'de-DE' => 'German',
-                                                'fr-FR' => 'French',
-                                                'es-ES' => 'Spanish (Spain)',
-                                                'es-MX' => 'Spanish (Mexico)',
-                                                'it-IT' => 'Italian',
-                                                'pt-PT' => 'Portuguese',
-                                                'pt-BR' => 'Portuguese (Brazil)',
-                                                'nl-NL' => 'Dutch',
-                                                'pl-PL' => 'Polish',
-                                                'ru-RU' => 'Russian',
-                                                'ja-JP' => 'Japanese',
-                                                'ko-KR' => 'Korean',
-                                                'zh-CN' => 'Chinese (Simplified)',
-                                                'zh-TW' => 'Chinese (Traditional)',
-                                                'ar-SA' => 'Arabic',
-                                                'tr-TR' => 'Turkish',
-                                                'sv-SE' => 'Swedish',
-                                                'da-DK' => 'Danish',
-                                                'fi-FI' => 'Finnish',
-                                                'no-NO' => 'Norwegian',
-                                            ])
-                                            ->default('en-US')
-                                            ->helperText(__('Preferred language for TMDB searches.')),
-                                        Toggle::make('tmdb_auto_lookup_on_import')
-                                            ->label(__('Auto-lookup on metadata fetch'))
-                                            ->helperText(__('Automatically lookup TMDB IDs when fetching metadata for VOD and Series. This may slow down imports and metadata fetching for large playlists.'))
-                                            ->live()
-                                            ->default(false),
-                                        Toggle::make('tmdb_auto_create_groups')
-                                            ->label(__('Auto-create groups/categories from TMDB genres'))
-                                            ->helperText(__('When enabled, TMDB metadata fetching will automatically create new groups (for VOD) and categories (for Series) based on TMDB genres. When disabled, only existing groups/categories will be used.'))
-                                            ->default(false),
-                                        Fieldset::make(__('TMDB Auto-lookup Settings'))
-                                            ->columnSpanFull()
-                                            ->schema([
-                                                ToggleButtons::make('tmdb_auto_lookup_all_new')
-                                                    ->options([
-                                                        'enabled' => __('Only enabled'),
-                                                        'new' => __('All new'),
-                                                        'both' => __('Both'),
-                                                    ])
-                                                    ->icons([
-                                                        'enabled' => 'heroicon-s-check',
-                                                        'new' => 'heroicon-s-plus',
-                                                        'both' => 'heroicon-s-squares-plus',
-                                                    ])
-                                                    ->colors([
-                                                        'enabled' => 'success',
-                                                        'new' => 'primary',
-                                                        'both' => 'primary',
-                                                    ])
-                                                    ->columnSpanFull()
-                                                    ->grouped()
-                                                    ->label(__('Auto-lookup scope'))
-                                                    ->helperText(__('Whether to automatically lookup TMDB IDs for all new VOD and Series, or only those that are enabled (default), or both.'))
-                                                    ->default('enabled'),
-                                            ])->hidden(fn (Get $get): bool => ! (bool) $get('tmdb_auto_lookup_on_import')),
-                                        TextInput::make('tmdb_rate_limit')
-                                            ->label(__('Rate Limit (requests/second)'))
-                                            ->placeholder(__('40'))
-                                            ->numeric()
-                                            ->minValue(1)
-                                            ->maxValue(50)
-                                            ->default(40)
-                                            ->helperText(__('Maximum TMDB API requests per second. TMDB allows ~40 req/s for free accounts.')),
-                                        TextInput::make('tmdb_confidence_threshold')
-                                            ->label(__('Match Confidence Threshold (%)'))
-                                            ->placeholder(__('80'))
-                                            ->numeric()
-                                            ->minValue(50)
-                                            ->maxValue(100)
-                                            ->default(80)
-                                            ->helperText(__('Minimum title similarity percentage (50-100) required to accept a match. Higher values = stricter matching.')),
                                     ]),
                             ]),
                         Tab::make(__('API'))
