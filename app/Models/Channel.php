@@ -350,12 +350,7 @@ class Channel extends Model
             return null;
         }
 
-        $settings = $service->getMediaFlowSettings();
-        $proxyUrl = $service->getMediaFlowProxyServerUrl();
-        $filename = parse_url($streamUrl, PHP_URL_PATH) ?? '';
-        $endpoint = str_ends_with($filename, '.m3u8') ? '/proxy/hls/manifest.m3u8' : '/proxy/stream';
-
-        return $proxyUrl.$endpoint.'?d='.urlencode($streamUrl).'&api_password='.$settings['mediaflow_proxy_password'];
+        return $service->buildMediaFlowStreamUrl($streamUrl);
     }
 
     /**

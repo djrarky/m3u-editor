@@ -1525,6 +1525,11 @@ class Preferences extends SettingsPage
                                             ->label(__('Proxy User Agent for Media Streams'))
                                             ->placeholder(__('VLC/3.0.21 LibVLC/3.0.21'))
                                             ->columnSpan(2),
+                                        Toggle::make('mediaflow_proxy_rewrite_stream_urls')
+                                            ->label(__('Automatically Rewrite Stream URLs'))
+                                            ->inline(false)
+                                            ->columnSpanFull()
+                                            ->helperText(__('When enabled, individual stream URLs in generated playlists and Xtream API responses will be rewritten to route through MediaFlow Proxy. Applies only when the m3u-proxy is not already in use for a given playlist or stream.')),
                                     ]),
                             ]),
 

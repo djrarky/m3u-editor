@@ -214,6 +214,20 @@ class PlaylistService
     }
 
     /**
+     * Build a MediaFlow Proxy URL for an arbitrary stream URL.
+     * Uses /proxy/hls/manifest.m3u8 for HLS (.m3u8) streams and /proxy/stream for everything else.
+     */
+    public function buildMediaFlowStreamUrl(string $streamUrl): string
+    {
+        $settings = $this->getMediaFlowSettings();
+        $proxyUrl = $this->getMediaFlowProxyServerUrl();
+        $filename = parse_url($streamUrl, PHP_URL_PATH) ?? '';
+        $endpoint = str_ends_with($filename, '.m3u8') ? '/proxy/hls/manifest.m3u8' : '/proxy/stream';
+
+        return $proxyUrl.$endpoint.'?d='.urlencode($streamUrl).'&api_password='.$settings['mediaflow_proxy_password'];
+    }
+
+    /**
      * Get the media flow proxy URLs for the given playlist
      *
      * @param  Playlist|MergedPlaylist|CustomPlaylist|PlaylistAlias  $playlist
@@ -623,6 +637,7 @@ class PlaylistService
             'mediaflow_proxy_password' => null,
             'mediaflow_proxy_user_agent' => null,
             'mediaflow_proxy_playlist_user_agent' => null,
+            'mediaflow_proxy_rewrite_stream_urls' => false,
         ];
         try {
             $settings = [
@@ -631,6 +646,7 @@ class PlaylistService
                 'mediaflow_proxy_password' => $userPreferences->mediaflow_proxy_password ?? $settings['mediaflow_proxy_password'],
                 'mediaflow_proxy_user_agent' => $userPreferences->mediaflow_proxy_user_agent ?? $settings['mediaflow_proxy_user_agent'],
                 'mediaflow_proxy_playlist_user_agent' => $userPreferences->mediaflow_proxy_playlist_user_agent ?? $settings['mediaflow_proxy_playlist_user_agent'],
+                'mediaflow_proxy_rewrite_stream_urls' => $userPreferences->mediaflow_proxy_rewrite_stream_urls ?? $settings['mediaflow_proxy_rewrite_stream_urls'],
             ];
         } catch (Exception $e) {
             // Ignore
