@@ -3365,6 +3365,22 @@ class PlaylistResource extends Resource implements CopilotResource
                     ->openUrlInNewTab(),
             ]),
 
+            // -- MediaFlow Proxy --
+            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
+                ModalActionGroup::section('MediaFlow Proxy', [
+                    Action::make('mf_download_m3u')
+                        ->label(__('Download M3U'))
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->url(fn ($record) => PlaylistFacade::getMediaFlowProxyUrls($record)['m3u'])
+                        ->openUrlInNewTab(),
+                    Action::make('mf_download_epg')
+                        ->label(__('Download EPG'))
+                        ->icon('heroicon-o-arrow-down-tray')
+                        ->url(fn ($record) => PlaylistFacade::getMediaFlowProxyUrls($record)['epg'])
+                        ->openUrlInNewTab(),
+                ]),
+            ] : []),
+
             // -- Playlist Management --
             ModalActionGroup::section('Playlist Management', [
                 Action::make('Duplicate')
