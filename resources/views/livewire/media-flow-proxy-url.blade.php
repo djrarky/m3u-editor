@@ -4,33 +4,34 @@
 @php($xtream = $urls['xtream'])
 <div class="space-y-4">
     @if (in_array($section, ['all', 'links']))
-        <div>
-            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
-                MediaFlow Proxy — M3U URL
-            </span>
-            <div class="flex gap-2 items-center justify-start">
-                <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
-                    <x-slot name="prefix">
-                        <x-copy-to-clipboard :text="$m3uUrl" />
-                    </x-slot>
-                    <x-filament::input type="text" :value="$m3uUrl" readonly />
-                </x-filament::input.wrapper>
-                <x-qr-modal :title="$this->record->name" body="MediaFlow Proxy — M3U URL" :text="$m3uUrl" />
+        <div class="lg:grid gap-4 grid-cols-2 mb-4">
+            <div>
+                <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
+                    MediaFlow Proxy — M3U URL
+                </span>
+                <div class="flex gap-2 items-center justify-start">
+                    <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
+                        <x-slot name="prefix">
+                            <x-copy-to-clipboard :text="$m3uUrl" />
+                        </x-slot>
+                        <x-filament::input type="text" :value="$m3uUrl" readonly />
+                    </x-filament::input.wrapper>
+                    <x-qr-modal :title="$this->record->name" body="MediaFlow Proxy — M3U URL" :text="$m3uUrl" />
+                </div>
             </div>
-        </div>
-
-        <div>
-            <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
-                MediaFlow Proxy — EPG URL
-            </span>
-            <div class="flex gap-2 items-center justify-start">
-                <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
-                    <x-slot name="prefix">
-                        <x-copy-to-clipboard :text="$epgUrl" />
-                    </x-slot>
-                    <x-filament::input type="text" :value="$epgUrl" readonly />
-                </x-filament::input.wrapper>
-                <x-qr-modal :title="$this->record->name" body="MediaFlow Proxy — EPG URL" :text="$epgUrl" />
+            <div>
+                <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
+                    MediaFlow Proxy — EPG URL
+                </span>
+                <div class="flex gap-2 items-center justify-start">
+                    <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
+                        <x-slot name="prefix">
+                            <x-copy-to-clipboard :text="$epgUrl" />
+                        </x-slot>
+                        <x-filament::input type="text" :value="$epgUrl" readonly />
+                    </x-filament::input.wrapper>
+                    <x-qr-modal :title="$this->record->name" body="MediaFlow Proxy — EPG URL" :text="$epgUrl" />
+                </div>
             </div>
         </div>
     @endif
@@ -129,9 +130,9 @@
         </div>
     @endif
 
-    <div class="fi-fo-field-wrp-helper-text break-words text-sm text-gray-500 mt-1">
+    <div class="w-full fi-fo-field-wrp-helper-text break-words text-sm text-center text-gray-500 mt-1">
         To disable, clear the MediaFlow Proxy values from the app <a
-            href="{{ url('preferences?tab=-integrations-tab') }}"
+            href="{{ url('preferences?tab=integrations%3A%3Adata%3A%3Atab') }}"
             class="text-indigo-500 hover:underline hover:text-indigo-600 dark:hover:text-indigo-400">Settings</a> page.
     </div>
 </div>

@@ -699,18 +699,12 @@ class PlaylistResource extends Resource implements CopilotResource
 
     public static function infolist(Schema $schema): Schema
     {
-        $extraLinks = [];
-        if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $extraLinks[] = Livewire::make(MediaFlowProxyUrl::class, ['section' => 'links']);
-        }
-        $extraLinks[] = Livewire::make(PlaylistEpgUrl::class);
-
         return $schema
             ->components([
                 Tabs::make()
                     ->persistTabInQueryString()
                     ->columnSpanFull()
-                    ->tabs([
+                    ->tabs(array_filter([
                         Tab::make(__('Details'))
                             ->icon('heroicon-o-play')
                             ->schema([
@@ -732,7 +726,9 @@ class PlaylistResource extends Resource implements CopilotResource
                                         Grid::make()
                                             ->columnSpan(1)
                                             ->columns(1)
-                                            ->schema($extraLinks),
+                                            ->schema([
+                                                Livewire::make(PlaylistEpgUrl::class),
+                                            ]),
                                     ]),
                             ]),
                         Tab::make(__('Xtream API'))
@@ -740,15 +736,23 @@ class PlaylistResource extends Resource implements CopilotResource
                             ->schema([
                                 Section::make()
                                     ->columns(1)
-                                    ->schema(array_filter([
+                                    ->schema([
                                         Livewire::make(XtreamApiInfo::class),
                                         Livewire::make(XtreamDnsStatus::class),
-                                        PlaylistFacade::mediaFlowProxyEnabled()
-                                            ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
-                                            : null,
-                                    ])),
+                                    ]),
                             ]),
-                    ])->contained(false),
+                        PlaylistFacade::mediaFlowProxyEnabled()
+                            ? Tab::make(__('MediaFlow Proxy'))
+                                ->icon('heroicon-m-shield-check')
+                                ->schema([
+                                    Section::make()
+                                        ->columns(1)
+                                        ->schema([
+                                            Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
+                                        ]),
+                                ])
+                            : null,
+                    ]))->contained(false),
                 Livewire::make(EpgViewer::class)
                     ->columnSpanFull(),
             ]);

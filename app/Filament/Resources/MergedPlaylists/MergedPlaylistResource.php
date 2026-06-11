@@ -468,10 +468,6 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                 ->columnSpan(1)
                 ->dehydrated(false), // don't save the value in the database
         ];
-        if (PlaylistFacade::mediaFlowProxyEnabled()) {
-            $urls[] = Livewire::make(MediaFlowProxyUrl::class, ['section' => 'links'])
-                ->columnSpan(1);
-        }
 
         return [
             Grid::make()
@@ -603,7 +599,7 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                             Tab::make(__('Xtream API'))
                                 ->columns(2)
                                 ->icon('heroicon-m-bolt')
-                                ->schema(array_filter([
+                                ->schema([
                                     Section::make(__('Xtream API'))
                                         ->compact()
                                         ->description(__('Xtream API connection details.'))
@@ -613,12 +609,24 @@ class MergedPlaylistResource extends Resource implements CopilotResource
                                             XtreamApiInfo::make('xtream_api_info')
                                                 ->label(__('Xtream API Info'))
                                                 ->columnSpan(2)
-                                                ->dehydrated(false), // don't save the value in the database
+                                                ->dehydrated(false),
                                         ]),
-                                    PlaylistFacade::mediaFlowProxyEnabled()
-                                        ? Livewire::make(MediaFlowProxyUrl::class, ['section' => 'xtream'])
-                                        : null,
-                                ])),
+                                ]),
+
+                            ...(PlaylistFacade::mediaFlowProxyEnabled() ? [
+                                Tab::make(__('MediaFlow Proxy'))
+                                    ->columns(2)
+                                    ->icon('heroicon-m-shield-check')
+                                    ->schema([
+                                        Section::make(__('MediaFlow Proxy'))
+                                            ->compact()
+                                            ->icon('heroicon-m-shield-check')
+                                            ->columnSpan(2)
+                                            ->schema([
+                                                Livewire::make(MediaFlowProxyUrl::class, ['section' => 'all']),
+                                            ]),
+                                    ]),
+                            ] : []),
 
                             Tab::make(__('Output'))
                                 ->columns(2)
