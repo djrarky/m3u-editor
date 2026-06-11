@@ -7,7 +7,7 @@
         <div class="lg:grid gap-4 grid-cols-2 mb-4">
             <div>
                 <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
-                    MediaFlow Proxy — M3U URL
+                    M3U URL
                 </span>
                 <div class="flex gap-2 items-center justify-start">
                     <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">
@@ -21,7 +21,7 @@
             </div>
             <div>
                 <span class="text-sm font-medium leading-6 text-gray-950 dark:text-white">
-                    MediaFlow Proxy — EPG URL
+                    EPG URL
                 </span>
                 <div class="flex gap-2 items-center justify-start">
                     <x-filament::input.wrapper suffix-icon="heroicon-m-globe-alt">

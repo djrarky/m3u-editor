@@ -35,6 +35,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Spatie\Tags\Tag;
@@ -602,7 +603,11 @@ class PlaylistService
      */
     public function mediaFlowProxyEnabled()
     {
-        return $this->getMediaFlowSettings()['mediaflow_proxy_url'] !== null;
+        return Cache::remember(
+            'mediaflow_proxy_enabled',
+            now()->addSeconds(15),
+            fn () => $this->getMediaFlowSettings()['mediaflow_proxy_url'] !== null
+        );
     }
 
     /**
