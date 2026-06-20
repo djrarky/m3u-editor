@@ -800,6 +800,7 @@ class XtreamApiController extends Controller
 
             $seriesQuery = $playlist->series()
                 ->where('series.enabled', true)
+                ->orderBy('series.sort', 'asc')
                 ->with(['tags', 'category']);
 
             // Apply category filtering if category_id is provided
@@ -1038,6 +1039,7 @@ class XtreamApiController extends Controller
                                 'info' => array_merge($episode->info, [
                                     'movie_image' => $movieImage ?? null,
                                     'cover_big' => $coverBig ?? null,
+                                    'plot' => $episode->plot ?? null,
                                 ]),
                                 'added' => $episode->added,
                                 'season' => $episode->season,
