@@ -13,6 +13,7 @@ use App\Services\PlaylistService;
 use App\Services\StreamProfileRuleEvaluator;
 use App\Services\XtreamService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
 use App\Support\TmdbEnrichment;
 use Exception;
 use Filament\Notifications\Notification;
@@ -48,6 +49,7 @@ class Channel extends Model
         'id' => 'integer',
         'enabled' => 'boolean',
         'channel' => 'integer',
+        'channel_minor' => 'integer',
         'shift' => 'integer',
         'user_id' => 'integer',
         'playlist_id' => 'integer',
@@ -336,6 +338,22 @@ class Channel extends Model
     public function getDisplayTitleAttribute(): string
     {
         return $this->title_custom ?? $this->title ?? $this->name_custom ?? $this->name ?? '';
+    }
+
+    /**
+     * The channel's own output number ("5" or "5.1"), before any playlist numbering.
+     * In a custom playlist context the pivot number (and its minor) wins when set.
+     */
+    public function resolveChannelNumber(bool $isCustomContext = false): int|string|null
+    {
+        $pivot = $isCustomContext ? $this->pivot : null;
+
+        return ChannelNumber::resolve(
+            $this->channel,
+            $this->channel_minor,
+            $pivot?->channel_number,
+            $pivot?->channel_minor,
+        );
     }
 
     /**

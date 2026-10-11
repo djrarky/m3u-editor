@@ -20,6 +20,7 @@ use App\Services\AlertService;
 use App\Services\SyncPipelineService;
 use App\Services\XtreamHealthService;
 use App\Settings\GeneralSettings;
+use App\Support\ChannelNumber;
 use App\Traits\ProviderRequestDelay;
 use Carbon\Carbon;
 use Exception;
@@ -616,6 +617,7 @@ class ProcessM3uImport implements ShouldQueue
                 'logo' => null,
                 'logo_internal' => null, // internal logo path
                 'channel' => null,
+                'channel_minor' => null,
                 'group' => '',
                 'group_internal' => '',
                 'stream_id' => null,
@@ -697,7 +699,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->epg_channel_id ?? $item->stream_id, // prefer EPG id for mapping, if set
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'catchup' => $item->tv_archive ?? null,
                             'shift' => (int) ($item->tv_archive_duration ?? 0) * 24,
                             // 'tvg_shift' => $item->tvg_shift ?? null, // @TODO: check if this is on Xtream API, not seeing it as a deffinition in the API docs
@@ -751,7 +753,7 @@ class ProcessM3uImport implements ShouldQueue
                             'group_internal' => $category['category_name'] ?? '',
                             'stream_id' => $item->stream_id,
                             'source_id' => $item->stream_id, // source ID for the channel
-                            'channel' => $item->num ?? null,
+                            ...ChannelNumber::toAttributes($item->num ?? null),
                             'is_vod' => true, // mark as VOD
                             'container_extension' => $extension, // store the container extension
                             'year' => $item->year ?? null, // new field for year
@@ -890,6 +892,7 @@ class ProcessM3uImport implements ShouldQueue
                     'logo' => null,
                     'logo_internal' => null,
                     'channel' => null,
+                    'channel_minor' => null,
                     'group' => '',
                     'group_internal' => '',
                     'stream_id' => null,
@@ -987,7 +990,10 @@ class ProcessM3uImport implements ShouldQueue
                                 foreach ($attributes as $key => $attribute) {
                                     if ($extTag->hasAttribute($attribute)) {
                                         if ($attribute === 'tvg-chno') {
-                                            $channel[$key] = (int) $extTag->getAttribute($attribute);
+                                            // Over-the-air sub-channels ("5.1") keep their minor part. An
+                                            // empty value still imports as 0, as the plain int cast did.
+                                            [$major, $channel['channel_minor']] = ChannelNumber::parse($extTag->getAttribute($attribute));
+                                            $channel['channel'] = $major ?? 0;
                                         } elseif ($attribute === 'tvg-logo') {
                                             $channel[$key] = Str::replace(' ', '%20', trim($extTag->getAttribute($attribute)));
                                         } else {
