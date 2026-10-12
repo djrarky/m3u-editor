@@ -1207,11 +1207,6 @@ class EpgCacheService
             ->where('aed_profile_id', $aedProfileId)
             ->select('id');
 
-        $usesProfile = function ($q) use ($aedProfileId, $profileGroupIds): void {
-            $q->where('c.aed_profile_id', $aedProfileId)
-                ->orWhereIn('c.group_id', $profileGroupIds);
-        };
-
         // Source playlists owning a channel or group with the profile
         $sourceIds = DB::table('groups')
             ->where('aed_profile_id', $aedProfileId)
@@ -1230,7 +1225,9 @@ class EpgCacheService
         // Custom playlists containing any of those channels
         $customIds = DB::table('channel_custom_playlist as ccp')
             ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
-            ->where($usesProfile)
+            ->where(fn ($query) => $query
+                ->where('c.aed_profile_id', $aedProfileId)
+                ->orWhereIn('c.group_id', $profileGroupIds))
             ->distinct()
             ->pluck('ccp.custom_playlist_id')
             ->all();

@@ -171,10 +171,10 @@ class AedExtractorService
             $startTime = null;
             $combined = $dateString ? "{$dateString} {$timeString}" : $timeString;
             $dateFormats = $dateString ? array_map('trim', explode('|', $profile->date_format)) : [null];
+            $timeFormats = array_map('trim', explode('|', $profile->time_format));
             foreach ($dateFormats as $dateFormat) {
-                foreach (explode('|', $profile->time_format) as $fmt) {
-                    $fmt = trim($fmt);
-                    $combinedFormat = $dateFormat ? "{$dateFormat} {$fmt}" : $fmt;
+                foreach ($timeFormats as $timeFormat) {
+                    $combinedFormat = $dateFormat ? "{$dateFormat} {$timeFormat}" : $timeFormat;
 
                     try {
                         $parsed = Carbon::createFromFormat($combinedFormat, $combined, $sourceTimezone);
@@ -183,7 +183,7 @@ class AedExtractorService
                             break 2;
                         }
                     } catch (InvalidFormatException) {
-                        continue;
+                        // Try the next format pair
                     }
                 }
             }
