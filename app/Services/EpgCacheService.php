@@ -402,6 +402,8 @@ class EpgCacheService
         $lastProgressUpdate = 0;
         $progressUpdateInterval = 5000; // Update progress every 5000 items instead of 50
 
+        $duplicatesRemoved = 0;
+
         $store = new EpgProgrammeStore;
         $store->beginWrite(Storage::disk('local')->path($this->getCacheFilePath($epg, self::PROGRAMMES_DB_FILE)));
 
@@ -534,8 +536,11 @@ class EpgCacheService
                 $this->saveChannelBatchOptimized($epg, $channelBatch, $channelCount <= $channelBatchSize);
             }
 
-            // Commit, index, and atomically swap the SQLite store into place.
-            $store->finish();
+            // Commit, index, drop exact duplicate programmes, and atomically swap the SQLite store into place.
+            $duplicatesRemoved = $store->finish();
+            if ($duplicatesRemoved > 0) {
+                Log::info("Removed {$duplicatesRemoved} exact duplicate programmes from EPG cache for {$epg->name}");
+            }
         } catch (\Throwable $e) {
             $store->discard();
             throw $e;
@@ -545,7 +550,8 @@ class EpgCacheService
 
         return [
             'channels' => $channelCount,
-            'programmes' => $programmeCount,
+            // Duplicates never reach the store, so they don't count towards the EPG's programmes
+            'programmes' => $programmeCount - $duplicatesRemoved,
             'date_count' => count($processedDates),
             'date_range' => $dateRangeTracker,
         ];
