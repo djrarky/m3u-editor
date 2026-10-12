@@ -166,23 +166,25 @@ class AedExtractorService
             $sourceTimezone = $profile->source_timezone ?: 'UTC';
             $outputTimezone = $profile->output_timezone ?: 'UTC';
 
-            // Try each pipe-separated time format until one parses successfully
+            // Try each pipe-separated date format with each pipe-separated time format
+            // until one pair parses successfully
             $startTime = null;
-            foreach (explode('|', $profile->time_format) as $fmt) {
-                $fmt = trim($fmt);
-                $combined = $dateString ? "{$dateString} {$timeString}" : $timeString;
-                $combinedFormat = $dateString && $profile->date_format
-                    ? trim($profile->date_format).' '.$fmt
-                    : $fmt;
+            $combined = $dateString ? "{$dateString} {$timeString}" : $timeString;
+            $dateFormats = $dateString ? array_map('trim', explode('|', $profile->date_format)) : [null];
+            foreach ($dateFormats as $dateFormat) {
+                foreach (explode('|', $profile->time_format) as $fmt) {
+                    $fmt = trim($fmt);
+                    $combinedFormat = $dateFormat ? "{$dateFormat} {$fmt}" : $fmt;
 
-                try {
-                    $parsed = Carbon::createFromFormat($combinedFormat, $combined, $sourceTimezone);
-                    if ($parsed !== false) {
-                        $startTime = $parsed;
-                        break;
+                    try {
+                        $parsed = Carbon::createFromFormat($combinedFormat, $combined, $sourceTimezone);
+                        if ($parsed !== false) {
+                            $startTime = $parsed;
+                            break 2;
+                        }
+                    } catch (InvalidFormatException) {
+                        continue;
                     }
-                } catch (InvalidFormatException) {
-                    continue;
                 }
             }
 
