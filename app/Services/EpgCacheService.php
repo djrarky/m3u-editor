@@ -1177,6 +1177,75 @@ class EpgCacheService
             ->pluck('custom_playlist_id')
             ->all();
 
+        self::bulkDeleteCacheFiles(self::withDependentPlaylists($sourceIds, $customIds));
+    }
+
+    /**
+     * Clear EPG file caches for all playlist types that output a channel using the
+     * given AED profile, either directly or through the channel's group. AED
+     * programmes are built when the EPG file is generated, so a cached file keeps
+     * serving the old profile's output until it expires.
+     */
+    public static function clearForAedProfile(int $aedProfileId): void
+    {
+        self::bulkDeleteCacheFiles(self::aedProfileCacheTargets($aedProfileId));
+    }
+
+    /**
+     * Resolve the playlist IDs (by table) whose EPG output uses the given AED profile.
+     * Split out from clearForAedProfile() so a profile delete can resolve them before
+     * the foreign keys are nulled and clear them after.
+     *
+     * Uses subqueries rather than loading channel IDs, since a group-level profile
+     * can cover thousands of channels.
+     *
+     * @return array<string, array<int>>
+     */
+    public static function aedProfileCacheTargets(int $aedProfileId): array
+    {
+        $profileGroupIds = DB::table('groups')
+            ->where('aed_profile_id', $aedProfileId)
+            ->select('id');
+
+        $usesProfile = function ($q) use ($aedProfileId, $profileGroupIds): void {
+            $q->where('c.aed_profile_id', $aedProfileId)
+                ->orWhereIn('c.group_id', $profileGroupIds);
+        };
+
+        // Source playlists owning a channel or group with the profile
+        $sourceIds = DB::table('groups')
+            ->where('aed_profile_id', $aedProfileId)
+            ->whereNotNull('playlist_id')
+            ->distinct()
+            ->pluck('playlist_id')
+            ->merge(DB::table('channels')
+                ->where('aed_profile_id', $aedProfileId)
+                ->whereNotNull('playlist_id')
+                ->distinct()
+                ->pluck('playlist_id'))
+            ->unique()
+            ->values()
+            ->all();
+
+        // Custom playlists containing any of those channels
+        $customIds = DB::table('channel_custom_playlist as ccp')
+            ->join('channels as c', 'c.id', '=', 'ccp.channel_id')
+            ->where($usesProfile)
+            ->distinct()
+            ->pluck('ccp.custom_playlist_id')
+            ->all();
+
+        return self::withDependentPlaylists($sourceIds, $customIds);
+    }
+
+    /**
+     * Expand affected source and custom playlist IDs with the merged playlists and
+     * aliases that output them, keyed by table for bulkDeleteCacheFiles().
+     *
+     * @return array<string, array<int>>
+     */
+    private static function withDependentPlaylists(array $sourceIds, array $customIds): array
+    {
         // Merged playlist IDs via the merged_playlist_playlist pivot
         $mergedIds = $sourceIds
             ? DB::table('merged_playlist_playlist')
@@ -1202,12 +1271,12 @@ class EpgCacheService
                 ->all()
             : [];
 
-        self::bulkDeleteCacheFiles([
+        return [
             'playlists' => $sourceIds,
             'custom_playlists' => $customIds,
             'merged_playlists' => $mergedIds,
             'playlist_aliases' => $aliasIds,
-        ]);
+        ];
     }
 
     /**
@@ -1273,7 +1342,7 @@ class EpgCacheService
     /**
      * Build EPG cache file paths from a table → IDs map and delete them in one Storage call.
      */
-    private static function bulkDeleteCacheFiles(array $tableIdMap): void
+    public static function bulkDeleteCacheFiles(array $tableIdMap): void
     {
         $paths = [];
         foreach ($tableIdMap as $table => $ids) {
