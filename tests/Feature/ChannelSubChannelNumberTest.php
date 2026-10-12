@@ -80,6 +80,8 @@ it('parses channel numbers into a major and minor pair', function (int|float|str
     'surrounding whitespace' => [' 12.3 ', [12, 3]],
     'float from a JSON-decoded Xtream num' => [5.1, [5, 1]],
     'integral float' => [5.0, [5, null]],
+    'largest kept minor' => ['5.9999', [5, 9999]],
+    'minor past the column range' => ['5.40000', [5, null]],
 ]);
 
 it('formats a pair as an int without a minor and as major.minor with one', function () {
@@ -249,6 +251,8 @@ it('imports tvg-chno sub-channels instead of truncating them', function () {
         'http://example.test/stream/3',
         '#EXTINF:-1 tvg-id="d" tvg-chno="" group-title="OTA",Empty',
         'http://example.test/stream/4',
+        '#EXTINF:-1 tvg-id="e" tvg-chno="7.40000" group-title="OTA",Malformed',
+        'http://example.test/stream/5',
     ]));
 
     try {
@@ -272,6 +276,7 @@ it('imports tvg-chno sub-channels instead of truncating them', function () {
             'Tenth' => [5, 10],
             'Whole' => [12, null],
             'Empty' => [0, null],
+            'Malformed' => [7, null],
         ]);
     } finally {
         DB::purge('jobs');

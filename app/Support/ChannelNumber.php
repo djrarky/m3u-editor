@@ -19,6 +19,11 @@ final class ChannelNumber
     public const PATTERN = '/^\d{1,9}(\.\d{1,4})?$/';
 
     /**
+     * Largest sub-channel part kept, matching the 4 digits PATTERN and the API allow.
+     */
+    public const MAX_MINOR = 9999;
+
+    /**
      * Split a channel number into its [major, minor] parts.
      *
      * "5.1" => [5, 1], "5.10" => [5, 10], "7" => [7, null] and "" => [null, null].
@@ -38,7 +43,9 @@ final class ChannelNumber
         if (preg_match('/^(\d+)\.(\d+)$/', $value, $matches)) {
             $minor = (int) $matches[2];
 
-            return [(int) $matches[1], $minor > 0 ? $minor : null];
+            // A minor past the column's range (a malformed provider value like
+            // "5.40000") is dropped rather than failing the import's insert.
+            return [(int) $matches[1], $minor > 0 && $minor <= self::MAX_MINOR ? $minor : null];
         }
 
         return [(int) $value, null];
