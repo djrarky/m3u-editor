@@ -14,6 +14,8 @@ Works with m3u, m3u8, m3u+ and Xtream codes api!
 
 EPG support for XMLTV files (local or remote), XMLTV URLs, and full **Schedules Direct** integration.
 
+![feature-card](https://m3ue.sparkison.dev/img/social-card.jpg)
+
 ### Questions/issues/suggestions
 
 Feel free to [open an issue](https://github.com/sparkison/m3u-editor/issues/new?template=bug_report.md) on this repo, or hit us up on [Discord](https://discord.gg/rS3abJ5dz7)
