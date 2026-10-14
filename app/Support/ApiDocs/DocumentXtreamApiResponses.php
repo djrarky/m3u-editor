@@ -239,6 +239,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                         'tmdb_id' => 1396,
                         'youtube_trailer' => 'HhesaQXLuRY',
                         'episode_run_time' => '47',
+                        'mpaa_rating' => 'TV-MA',
                         'category_id' => '2',
                         'category_ids' => [2],
                     ],

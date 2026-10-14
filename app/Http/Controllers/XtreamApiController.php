@@ -1030,6 +1030,7 @@ class XtreamApiController extends Controller
                         'tmdb_id' => (int) ($tmdb ?: 0),
                         'youtube_trailer' => $seriesItem->youtube_trailer ?? '',
                         'episode_run_time' => (string) ($seriesItem->episode_run_time ?? 0),
+                        'mpaa_rating' => $seriesItem->getContentRating() ?? '',
                         'category_id' => $seriesCategoryId,
                         'category_ids' => array_values(array_unique(array_merge(
                             [(int) $seriesCategoryId],
