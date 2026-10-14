@@ -637,6 +637,7 @@ class ProcessM3uImport implements ShouldQueue
                 'year' => null, // new field for year
                 'rating' => null, // new field for rating
                 'rating_5based' => null, // new field for 5-based rating
+                'source_added_at' => null, // provider `added` (VOD only)
                 'source_id' => null, // source ID for the channel
                 'can_merge' => $this->canMergeEnabled,
                 'epg_map_enabled' => $this->epgMapEnabled,
@@ -759,6 +760,9 @@ class ProcessM3uImport implements ShouldQueue
                             'year' => $item->year ?? null, // new field for year
                             'rating' => $item->rating ?? null, // new field for rating
                             'rating_5based' => $item->rating_5based ?? null, // new field for 5-based rating
+                            'source_added_at' => is_numeric($item->added ?? null) && (int) $item->added > 0
+                                ? Carbon::createFromTimestamp((int) $item->added)->toDateTimeString()
+                                : null, // provider `added` (unix timestamp)
                         ];
                         if ($autoSort) {
                             $channel['sort'] = $localChannelNo;

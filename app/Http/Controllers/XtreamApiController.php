@@ -844,7 +844,7 @@ class XtreamApiController extends Controller
                             $channel->info['vote_count'] ?? null
                         ),
                         'rating_5based' => $channel->rating_5based ?? 0,
-                        'added' => (string) $channel->created_at->timestamp,
+                        'added' => (string) ($channel->source_added_at ?? $channel->created_at)->timestamp,
                         'category_id' => $channelCategoryId,
                         'category_ids' => array_values(array_unique(array_merge(
                             [(int) $channelCategoryId],
@@ -1795,7 +1795,7 @@ class XtreamApiController extends Controller
                 'name' => $movieData['name'] ?? $channel->name,
                 'title' => $movieData['title'] ?? $channel->name,
                 'year' => app(VodFileNameService::class)->resolveMovieYearAsInt($channel),
-                'added' => $movieData['added'] ?? (string) ($channel->created_at ? $channel->created_at->timestamp : time()),
+                'added' => $movieData['added'] ?? (string) (($channel->source_added_at ?? $channel->created_at)?->timestamp ?? time()),
                 'category_id' => (string) ($channel->group_id ?? ''),
                 'category_ids' => ($channel->group_id ? [(int) $channel->group_id] : []),
                 'container_extension' => $extension,
