@@ -840,6 +840,35 @@ it('suppresses episode rating on get series info when tmdb vote_count is below t
     expect($episodes[0]['info']['rating'])->toBe('');
 });
 
+it('returns the season trailer on get series info', function () {
+    $category = Category::factory()->for($this->user)->for($this->playlist)->create();
+    $series = Series::factory()->for($this->playlist)->create([
+        'user_id' => $this->user->id,
+        'category_id' => $category->id,
+        'enabled' => true,
+        'name' => 'Series With Season Trailers',
+        'metadata' => ['tmdb' => ''],
+    ]);
+
+    foreach ([1 => ['youtube_trailer' => 'https://www.youtube.com/watch?v=abc123'], 2 => []] as $seasonNumber => $metadata) {
+        Season::factory()->create([
+            'user_id' => $this->user->id,
+            'playlist_id' => $this->playlist->id,
+            'category_id' => $category->id,
+            'series_id' => $series->id,
+            'season_number' => $seasonNumber,
+            'metadata' => $metadata,
+        ]);
+    }
+
+    $response = $this->getJson(getXtreamApiUrl($this->username, $this->password, 'get_series_info', ['series_id' => $series->id]));
+
+    $response->assertOk();
+    $trailers = collect($response->json('seasons'))->pluck('youtube_trailer', 'season_number');
+    expect($trailers[1])->toBe('https://www.youtube.com/watch?v=abc123')
+        ->and($trailers[2])->toBe('');
+});
+
 it('surfaces episode rating on get series info when tmdb vote_count is at or above threshold', function () {
     $category = Category::factory()->for($this->user)->for($this->playlist)->create();
     $series = Series::factory()->for($this->playlist)->create([

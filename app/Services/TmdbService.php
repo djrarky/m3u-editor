@@ -958,19 +958,7 @@ class TmdbService
                 }
             }
 
-            // Extract YouTube trailer
-            $youtubeTrailer = null;
-            if (! empty($data['videos']['results'])) {
-                $trailer = collect($data['videos']['results'])
-                    ->firstWhere(function ($video) {
-                        return $video['site'] === 'YouTube'
-                            && in_array($video['type'], ['Trailer', 'Teaser']);
-                    });
-
-                if ($trailer) {
-                    $youtubeTrailer = 'https://www.youtube.com/watch?v='.$trailer['key'];
-                }
-            }
+            $youtubeTrailer = $this->pickYoutubeTrailer($data, ['Trailer', 'Teaser']);
 
             return [
                 'tmdb_id' => $data['id'] ?? null,
@@ -1081,18 +1069,7 @@ class TmdbService
                     ->toArray();
             }
 
-            // Extract YouTube trailer
-            $youtubeTrailer = null;
-            if (! empty($data['videos']['results'])) {
-                $trailer = collect($data['videos']['results'])
-                    ->where('site', 'YouTube')
-                    ->where('type', 'Trailer')
-                    ->first();
-
-                if ($trailer) {
-                    $youtubeTrailer = 'https://www.youtube.com/watch?v='.$trailer['key'];
-                }
-            }
+            $youtubeTrailer = $this->pickYoutubeTrailer($data, ['Trailer']);
 
             return [
                 'tmdb_id' => $data['id'] ?? null,
@@ -2196,6 +2173,23 @@ class TmdbService
     }
 
     /**
+     * Pick the first YouTube video of an allowed type from a TMDB response's
+     * appended `videos` and return its watch URL.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  list<string>  $types
+     */
+    private function pickYoutubeTrailer(array $data, array $types): ?string
+    {
+        $trailer = collect($data['videos']['results'] ?? [])
+            ->first(fn ($video) => ($video['site'] ?? null) === 'YouTube'
+                && in_array($video['type'] ?? null, $types, true)
+                && ! empty($video['key']));
+
+        return $trailer ? 'https://www.youtube.com/watch?v='.$trailer['key'] : null;
+    }
+
+    /**
      * Map a TMDB season response to the shape shared by both season lookups.
      *
      * `season_id` is TMDB's ID for the season itself, not the series ID used to request it.
@@ -2215,6 +2209,7 @@ class TmdbService
             'air_date' => $data['air_date'] ?? null,
             'poster_path' => $posterPath,
             'poster_url' => is_string($posterPath) ? "https://image.tmdb.org/t/p/w500{$posterPath}" : null,
+            'youtube_trailer' => $this->pickYoutubeTrailer($data, ['Trailer', 'Teaser']),
             'episodes' => collect($data['episodes'] ?? [])->map(function ($episode) {
                 return [
                     'id' => $episode['id'] ?? null,

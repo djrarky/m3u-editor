@@ -305,6 +305,7 @@ class DocumentXtreamApiResponses implements DocumentTransformer
                             'cover_big' => 'https://example.com/covers/breaking_bad_s01.jpg',
                             'releaseDate' => '2008-01-20',
                             'duration' => '0',
+                            'youtube_trailer' => 'https://www.youtube.com/watch?v=HhesaQXLuRY',
                         ],
                     ],
                 ],

@@ -1250,6 +1250,7 @@ class XtreamApiController extends Controller
                         'cover_big' => $coverBig,
                         'releaseDate' => $season->metadata['release_date'] ?? $season->metadata['releaseDate'] ?? $season->metadata['air_date'] ?? '',
                         'duration' => (string) ($season->metadata['duration'] ?? 0),
+                        'youtube_trailer' => $season->metadata['youtube_trailer'] ?? '',
                     ];
                     $seasonEpisodes = [];
                     if ($season->episodes && $season->episodes->isNotEmpty()) {

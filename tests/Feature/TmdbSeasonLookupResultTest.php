@@ -63,6 +63,25 @@ it('returns a validated found result for a numbered season including specials', 
         ->and($result['payload']['season_id'])->toBe(900000 + $seasonNumber);
 })->with([0, 1, 3, 7]);
 
+it('picks the first youtube trailer or teaser from the season videos', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/123/season/2*' => Http::response(seasonResponse(2) + [
+            'videos' => ['results' => [
+                ['site' => 'Vimeo', 'type' => 'Trailer', 'key' => 'vimeo1'],
+                ['site' => 'YouTube', 'type' => 'Featurette', 'key' => 'feat1'],
+                ['site' => 'YouTube', 'type' => 'Teaser', 'key' => 'teaser1'],
+                ['site' => 'YouTube', 'type' => 'Trailer', 'key' => 'trailer1'],
+            ]],
+        ]),
+        'https://api.themoviedb.org/3/tv/123/season/3*' => Http::response(seasonResponse(3)),
+    ]);
+
+    $service = tmdbSeasonService($this->settings);
+
+    expect($service->getSeasonDetailsResult(123, 2)['payload']['youtube_trailer'])->toBe('https://www.youtube.com/watch?v=teaser1')
+        ->and($service->getSeasonDetailsResult(123, 3)['payload']['youtube_trailer'])->toBeNull();
+});
+
 it('caches validated found results by request context', function () {
     Http::fake([
         'https://api.themoviedb.org/3/tv/123/season/3*' => Http::response(seasonResponse(3)),
