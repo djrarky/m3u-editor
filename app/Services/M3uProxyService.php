@@ -3987,13 +3987,14 @@ class M3uProxyService
 
         $networkId = $recording->uuid;
 
-        // Record from now (a late start or a resume) to the scheduled end plus the
-        // end-late buffer, so a restarted capture doesn't overrun the airing window.
+        // Record from now (a late start or a resume) to the scheduled end, so a
+        // restarted capture doesn't overrun the airing window.
         $durationSeconds = 0;
         if ($recording->scheduled_start && $recording->scheduled_end) {
-            $endsAt = $recording->scheduled_end->copy()->addSeconds((int) $setting->resolveEndLateSeconds(null));
+            // scheduled_end already includes the rule's end-late/finish-early padding,
+            // so adding the playlist default again would over-record.
             $startsAt = now()->max($recording->scheduled_start);
-            $durationSeconds = max(0, (int) $startsAt->diffInSeconds($endsAt, false));
+            $durationSeconds = max(0, (int) $startsAt->diffInSeconds($recording->scheduled_end, false));
         }
 
         // When transcoding is enabled the proxy runs FFmpeg for the DVR broadcast
