@@ -135,7 +135,6 @@ final class DvrPaddingFields
 
         return Fieldset::make($label)
             ->columns(['default' => 1, 'sm' => 2])
-            ->columnSpanFull()
             ->schema([
                 Hidden::make($field)->default($defaultSeconds),
                 ...$inputs,
