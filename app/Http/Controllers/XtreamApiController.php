@@ -2402,12 +2402,12 @@ class XtreamApiController extends Controller
             ->get();
 
         // Build a mapping of group name -> stable category ID
-        $categoryMap = $this->buildNetworkCategoryMap($networks);
+        $categoryMap = $this->buildNetworkCategoryMap($playlist, $networks);
 
         $liveStreams = [];
         foreach ($networks as $network) {
             $streamIcon = $network->logo ?: $baseUrl.'/placeholder.png';
-            $categoryId = $categoryMap[$network->effective_group_name] ?? 'networks';
+            $categoryId = $categoryMap[$network->effective_group_name] ?? 0;
 
             $liveStreams[] = [
                 'num' => $network->channel_number ?? $network->id,
@@ -2436,15 +2436,18 @@ class XtreamApiController extends Controller
      */
     private function getNetworkLiveCategories(Playlist $playlist): \Illuminate\Http\JsonResponse
     {
-        $networks = $playlist->networks()->where('enabled', true)->get();
+        $networks = $playlist->networks()
+            ->where('enabled', true)
+            ->orderBy('channel_number')
+            ->get();
 
         if ($networks->isEmpty()) {
             return response()->json([]);
         }
 
-        $categoryMap = $this->buildNetworkCategoryMap($networks);
+        $categoryMap = $this->buildNetworkCategoryMap($playlist, $networks);
 
-        $categories = collect($categoryMap)->map(fn (string $id, string $name) => [
+        $categories = collect($categoryMap)->map(fn (int $id, string $name) => [
             'category_id' => $id,
             'category_name' => $name,
             'parent_id' => 0,
@@ -2456,17 +2459,22 @@ class XtreamApiController extends Controller
     /**
      * Build a consistent mapping of network group name to category ID.
      *
+     * The IDs are the primary keys of the Group rows NetworkChannelSyncService
+     * projects for each network: numeric (so Xtream consumers like
+     * ProcessM3uImport can bind them against bigint source group columns,
+     * issue #1303) and stable across requests.
+     *
      * @param  Collection<int, Network>  $networks
-     * @return array<string, string>
+     * @return array<string, int>
      */
-    private function buildNetworkCategoryMap(Collection $networks): array
+    private function buildNetworkCategoryMap(Playlist $playlist, Collection $networks): array
     {
-        $index = 1;
+        $names = $networks->map(fn (Network $network) => $network->effective_group_name)->unique()->values();
+        $groupIds = $playlist->groups()->whereIn('name', $names)->pluck('id', 'name');
 
-        return $networks
-            ->map(fn (Network $network) => $network->effective_group_name)
-            ->unique()
-            ->mapWithKeys(fn (string $name) => [$name => 'network-group-'.($index++)])
+        return $names
+            ->filter(fn (string $name) => $groupIds->has($name))
+            ->mapWithKeys(fn (string $name) => [$name => (int) $groupIds[$name]])
             ->all();
     }
 
