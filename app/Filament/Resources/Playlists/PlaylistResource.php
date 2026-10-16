@@ -244,6 +244,7 @@ class PlaylistResource extends Resource implements CopilotResource
                     })
                     ->sortable(),
                 TextColumn::make('url')
+                    ->extraAttributes(['class' => 'privacy-sensitive'])
                     ->label(__('Playlist URL'))
                     ->wrap()
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -880,6 +881,7 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->default(false)
                         ->live(),
                     TextInput::make('xtream_config.url')
+                        ->extraInputAttributes(['class' => 'privacy-sensitive'])
                         ->label(__('Xtream API URL'))
                         ->live()
                         ->helperText(__('Enter the full url, using <url>:<port> format - without trailing slash (/).'))
@@ -986,6 +988,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->helperText(__('Alternative Xtream API URLs. If the primary URL fails during a sync, these will be tried in order (same credentials are used for all URLs).'))
                                 ->simple(
                                     TextInput::make('url')
+                                        ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                         ->label(__('URL'))
                                         ->prefixIcon('heroicon-m-globe-alt')
                                         ->rules([new UrlIsAllowed])
@@ -1100,6 +1103,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->columns(3)
                                 ->schema([
                                     TextInput::make('xtream_config.username')
+                                        ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                         ->label(__('Xtream API Username'))
                                         ->live()
                                         ->required()
@@ -1141,6 +1145,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ]),
                         ])->hidden(fn (Get $get): bool => ! $get('xtream')),
                     TextInput::make('url')
+                        ->extraInputAttributes(['class' => 'privacy-sensitive'])
                         ->label(__('URL or Local file path'))
                         ->columnSpan(2)
                         ->prefixIcon('heroicon-m-globe-alt')
@@ -1350,12 +1355,14 @@ class PlaylistResource extends Resource implements CopilotResource
                                 ->placeholder(__('Backup Account'))
                                 ->columnSpan(2),
                             TextInput::make('url')
+                                ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                 ->label(__('Provider URL'))
                                 ->placeholder(fn (Get $get, $livewire) => $livewire->getRecord()?->xtream_config['url'] ?? 'http://provider.com:port')
                                 ->rules([new UrlIsAllowed])
                                 ->helperText(__('Leave blank to use the same provider as the primary account.'))
                                 ->columnSpan(2),
                             TextInput::make('username')
+                                ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                 ->label(__('Username'))
                                 ->required()
                                 ->live(onBlur: true)
@@ -1393,7 +1400,11 @@ class PlaylistResource extends Resource implements CopilotResource
                         ->addActionLabel('Add Profile')
                         ->reorderable()
                         ->collapsible()
-                        ->itemLabel(fn (array $state): ?string => $state['name'] ?? $state['username'] ?? 'New Profile')
+                        ->itemLabel(fn (array $state): string|HtmlString => match (true) {
+                            filled($state['name'] ?? null) => $state['name'],
+                            filled($state['username'] ?? null) => new HtmlString('<span class="privacy-sensitive">'.e($state['username']).'</span>'),
+                            default => 'New Profile',
+                        })
                         ->extraItemActions([
                             Action::make('test_profile')
                                 ->label(__('Test'))
@@ -4053,6 +4064,7 @@ class PlaylistResource extends Resource implements CopilotResource
                                             ->columnSpan(2),
 
                                         TextInput::make('auth_username')
+                                            ->extraInputAttributes(['class' => 'privacy-sensitive'])
                                             ->label(__('Username'))
                                             ->helperText(__('Username for playlist access.'))
                                             ->required()
