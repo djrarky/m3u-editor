@@ -70,22 +70,28 @@ afterEach(function () {
 });
 
 /**
- * Every 40th channel reuses the id "dup.test", so duplicates land in each 50-channel chunk.
- * With $cutMidProgramme the file stops inside a programme title, like a guide cut off partway.
+ * Writes one element per line like a real XMLTV feed. Every 40th channel reuses the id
+ * "dup.test", so duplicates land in each 50-channel chunk.
+ *
+ * With $cutMidProgramme the file stops inside a programme title after a run of programmes,
+ * like a guide cut off partway. Keeping the cut well past the channels matters: libxml 2.9
+ * (CI) reads ahead while expanding a channel and throws if the end is already in view.
  */
 function writeXmltv(string $path, int $channelCount, bool $cutMidProgramme = false): void
 {
-    $xml = '<?xml version="1.0" encoding="UTF-8"?><tv>';
+    $lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<tv>'];
     foreach (range(1, $channelCount) as $i) {
         $channelId = $i % 40 === 0 ? 'dup.test' : "ch{$i}.test";
-        $xml .= "<channel id=\"{$channelId}\"><display-name lang=\"en\">Channel {$i}</display-name></channel>";
+        $lines[] = "<channel id=\"{$channelId}\"><display-name lang=\"en\">Channel {$i}</display-name></channel>";
     }
-    $xml .= '<programme start="20260101000000 +0000" stop="20260101010000 +0000" channel="ch1.test"><title>Show</title></programme>';
-    $xml .= $cutMidProgramme
+    foreach (range(1, $cutMidProgramme ? 200 : 1) as $i) {
+        $lines[] = "<programme start=\"20260101000000 +0000\" stop=\"20260101010000 +0000\" channel=\"ch1.test\"><title>Show {$i}</title></programme>";
+    }
+    $lines[] = $cutMidProgramme
         ? '<programme start="20260101010000 +0000" stop="20260101020000 +0000" channel="ch1.test"><title>Sh'
         : '</tv>';
 
-    file_put_contents($path, $xml);
+    file_put_contents($path, implode("\n", $lines));
 }
 
 it('imports every channel of a feed spanning several 50-channel chunks and drops channels the feed no longer lists', function () {
@@ -192,7 +198,7 @@ it('fails and keeps the existing guide when the file is cut off partway through 
 
     $epg = $this->epg->fresh();
     expect($epg->status)->toBe(Status::Failed)
-        ->and($epg->errors)->toStartWith('The EPG file ended early or is malformed (line 1:')
+        ->and($epg->errors)->toStartWith('The EPG file ended early or is malformed (line ')
         ->and($epg->channels()->pluck('id')->all())->toBe([$existing->id])
         ->and(Job::query()->count())->toBe(0);
     Bus::assertNotDispatched(ProcessEpgImportChunk::class);
@@ -221,15 +227,22 @@ it('treats a feed that stops at the channel limit as complete', function () {
         ->and($epg->channels()->count())->toBe(100);
 });
 
-it('drops the chunk rows it already queued when parsing fails partway through', function () {
+it('drops the chunk rows it already queued when the import throws partway through', function () {
     writeXmltv($this->xmltvPath, 120);
-    $xml = file_get_contents($this->xmltvPath);
-    // Cut inside the 110th channel, after two 50-channel chunks were queued
-    file_put_contents($this->xmltvPath, substr($xml, 0, strpos($xml, '<channel id="ch110.test">') + 20));
+
+    // Fail while queueing the third 50-channel chunk, after two rows were saved
+    $queued = 0;
+    Job::creating(function () use (&$queued) {
+        if (++$queued === 3) {
+            throw new RuntimeException('Simulated failure while queueing chunks');
+        }
+    });
 
     ($this->runImport)();
 
-    expect($this->epg->fresh()->status)->toBe(Status::Failed)
+    $epg = $this->epg->fresh();
+    expect($epg->status)->toBe(Status::Failed)
+        ->and($epg->errors)->toBe('Simulated failure while queueing chunks')
         ->and(Job::query()->count())->toBe(0);
 });
 
