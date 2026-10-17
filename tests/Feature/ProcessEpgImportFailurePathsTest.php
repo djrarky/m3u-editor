@@ -41,8 +41,10 @@ beforeEach(function () {
     ]);
 
     // Runs the import, then the chunk/complete chain exactly as it was dispatched
-    $this->runImport = function () {
-        (new ProcessEpgImport($this->epg->fresh(), force: true))->handle(app(SchedulesDirectService::class));
+    $this->runImport = function (?int $maxItems = null) {
+        $import = new ProcessEpgImport($this->epg->fresh(), force: true);
+        $import->maxItems = $maxItems ?? $import->maxItems;
+        $import->handle(app(SchedulesDirectService::class));
 
         $first = Bus::dispatched(ProcessEpgImportChunk::class)->first()
             ?? Bus::dispatched(ProcessEpgImportComplete::class)->first();
@@ -69,8 +71,9 @@ afterEach(function () {
 
 /**
  * Every 40th channel reuses the id "dup.test", so duplicates land in each 50-channel chunk.
+ * With $cutMidProgramme the file stops inside a programme title, like a guide cut off partway.
  */
-function writeXmltv(string $path, int $channelCount): void
+function writeXmltv(string $path, int $channelCount, bool $cutMidProgramme = false): void
 {
     $xml = '<?xml version="1.0" encoding="UTF-8"?><tv>';
     foreach (range(1, $channelCount) as $i) {
@@ -78,7 +81,9 @@ function writeXmltv(string $path, int $channelCount): void
         $xml .= "<channel id=\"{$channelId}\"><display-name lang=\"en\">Channel {$i}</display-name></channel>";
     }
     $xml .= '<programme start="20260101000000 +0000" stop="20260101010000 +0000" channel="ch1.test"><title>Show</title></programme>';
-    $xml .= '</tv>';
+    $xml .= $cutMidProgramme
+        ? '<programme start="20260101010000 +0000" stop="20260101020000 +0000" channel="ch1.test"><title>Sh'
+        : '</tv>';
 
     file_put_contents($path, $xml);
 }
@@ -179,6 +184,55 @@ it('still completes an empty feed for an EPG that has no channels yet', function
     Bus::assertDispatched(ProcessEpgImportComplete::class);
 });
 
+it('fails and keeps the existing guide when the file is cut off partway through the programmes', function () {
+    $existing = EpgChannel::factory()->for($this->user)->for($this->epg)->create(['import_batch_no' => 'previous-batch']);
+    writeXmltv($this->xmltvPath, 120, cutMidProgramme: true);
+
+    ($this->runImport)();
+
+    $epg = $this->epg->fresh();
+    expect($epg->status)->toBe(Status::Failed)
+        ->and($epg->errors)->toStartWith('The EPG file ended early or is malformed (line 1:')
+        ->and($epg->channels()->pluck('id')->all())->toBe([$existing->id])
+        ->and(Job::query()->count())->toBe(0);
+    Bus::assertNotDispatched(ProcessEpgImportChunk::class);
+});
+
+it('imports what parsed from a cut off file for an EPG that has no guide yet', function () {
+    writeXmltv($this->xmltvPath, 120, cutMidProgramme: true);
+
+    ($this->runImport)();
+
+    $epg = $this->epg->fresh();
+    expect($epg->errors)->toBeNull()
+        ->and($epg->channel_count)->toBe(120)
+        ->and($epg->channels()->count())->toBe(120);
+});
+
+it('treats a feed that stops at the channel limit as complete', function () {
+    EpgChannel::factory()->for($this->user)->for($this->epg)->create(['import_batch_no' => 'previous-batch']);
+    writeXmltv($this->xmltvPath, 120);
+
+    ($this->runImport)(maxItems: 100);
+
+    $epg = $this->epg->fresh();
+    expect($epg->errors)->toBeNull()
+        ->and($epg->channel_count)->toBe(100)
+        ->and($epg->channels()->count())->toBe(100);
+});
+
+it('drops the chunk rows it already queued when parsing fails partway through', function () {
+    writeXmltv($this->xmltvPath, 120);
+    $xml = file_get_contents($this->xmltvPath);
+    // Cut inside the 110th channel, after two 50-channel chunks were queued
+    file_put_contents($this->xmltvPath, substr($xml, 0, strpos($xml, '<channel id="ch110.test">') + 20));
+
+    ($this->runImport)();
+
+    expect($this->epg->fresh()->status)->toBe(Status::Failed)
+        ->and(Job::query()->count())->toBe(0);
+});
+
 describe('URL download', function () {
     beforeEach(function () {
         Storage::fake('local');
@@ -212,6 +266,7 @@ describe('URL download', function () {
     })->with([
         'HTML error page' => fn () => fn () => Http::response('<html><body><h1>Maintenance</h1></body></html>'),
         'truncated download' => fn () => fn () => Http::response('<?xml version="1.0"?><tv><channel id="ch1.test"><display-na'),
+        'cut off mid-programme' => fn () => fn () => Http::response('<?xml version="1.0"?><tv><channel id="ch1.test"><display-name>One</display-name></channel><programme channel="ch1.test"><title>Sh'),
         'HTTP 503' => fn () => fn () => Http::response('<html><body>503</body></html>', 503),
     ]);
 });

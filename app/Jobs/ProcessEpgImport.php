@@ -123,6 +123,9 @@ class ProcessEpgImport implements ShouldQueue
         // Path of a fresh URL download that hasn't replaced the guide file yet
         $downloadPath = null;
 
+        // Import batch, so a failed import can drop the chunk rows it already queued
+        $batchNo = null;
+
         // Process EPG XMLTV based on standard format
         // Info: https://wiki.xmltv.org/index.php/XMLTVFormat
         try {
@@ -262,14 +265,27 @@ class ProcessEpgImport implements ShouldQueue
                 $programmeCount = 0;
                 $seen = [];
 
+                // Read errors are suppressed below, so a file cut off or broken partway through
+                // just stops reading. Track whether the reader got to the end of the guide.
+                $readToEnd = false;
+                libxml_clear_errors();
+
                 // Create a lazy collection to process the XML data
-                LazyCollection::make(function () use (&$programmeCount, &$channelCount, &$seen, $channelReader, $defaultChannelData) {
+                LazyCollection::make(function () use (&$programmeCount, &$channelCount, &$seen, &$readToEnd, $channelReader, $defaultChannelData) {
                     // Loop through the XML data
                     $channelCount = 0;
                     while (@$channelReader->read()) {
                         // Limit the number of items to process
                         if ($channelCount >= $this->maxItems) {
+                            $readToEnd = true;
                             break;
+                        }
+
+                        if ($channelReader->name === 'tv'
+                            && ($channelReader->nodeType == XMLReader::END_ELEMENT
+                                || ($channelReader->nodeType == XMLReader::ELEMENT && $channelReader->isEmptyElement))
+                        ) {
+                            $readToEnd = true;
                         }
 
                         // Only consider XML elements and channel nodes
@@ -360,7 +376,18 @@ class ProcessEpgImport implements ShouldQueue
                 // body reads as zero channels. Completing that import would delete every
                 // existing EPG channel and its mappings, so fail and keep the current data.
                 if ($channelCount === 0 && $epg->channels()->exists()) {
-                    $this->failImport('No channels found in the EPG file. The source may have returned an error page instead of XMLTV guide data. The existing EPG data was kept.');
+                    $this->failImport('No channels found in the EPG file. The source may have returned an error page instead of XMLTV guide data. The existing EPG data was kept.', $batchNo);
+
+                    return;
+                }
+
+                // A file that stops partway through would replace the guide with a shorter one.
+                // Keep the existing guide when there is one; a new EPG still imports what parsed,
+                // so a feed that is always malformed at some point still gives a partial guide.
+                if (! $readToEnd && $epg->channels()->exists()) {
+                    $xmlError = libxml_get_last_error();
+                    $detail = $xmlError ? " (line {$xmlError->line}: ".trim($xmlError->message).')' : '';
+                    $this->failImport("The EPG file ended early or is malformed{$detail}. The existing EPG data was kept.", $batchNo);
 
                     return;
                 }
@@ -450,7 +477,7 @@ class ProcessEpgImport implements ShouldQueue
 
             event(new SyncCompleted($this->epg));
         } catch (Exception $e) {
-            $this->failImport($e->getMessage());
+            $this->failImport($e->getMessage(), $batchNo);
         } finally {
             // Drop a download that never became the guide file (failed, truncated or not XMLTV)
             if ($downloadPath !== null) {
@@ -462,10 +489,15 @@ class ProcessEpgImport implements ShouldQueue
 
     /**
      * Mark the import as failed, notify the owner and queue a resync when the EPG allows it.
+     * Chunk rows already queued for $batchNo are dropped, since no chain will process them.
      */
-    private function failImport(string $error): void
+    private function failImport(string $error, ?string $batchNo = null): void
     {
         logger()->error("Error processing \"{$this->epg->name}\": {$error}");
+
+        if ($batchNo !== null) {
+            Job::where('batch_no', $batchNo)->delete();
+        }
 
         Notification::make()
             ->danger()
