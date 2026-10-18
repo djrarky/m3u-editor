@@ -1785,22 +1785,6 @@ class EmbyLibraryMappingsRelationManager extends RelationManager
 
     private function lifecyclePreparedPath(string $path, string $collectionType): ?string
     {
-        $root = $this->ownerRecord->emby_managed_setup_root;
-        if (! is_string($root)
-            || ! MediaServerIntegration::isSafeWritablePath($path)
-            || ! MediaServerIntegration::isPathWithinWritableRoot($path, $root)) {
-            return null;
-        }
-
-        $normalizedPath = rtrim(str_replace('\\', '/', $path), '/');
-        $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/');
-        $relativePath = substr($normalizedPath, strlen($normalizedRoot) + 1);
-        $preparedDirectory = explode('/', $relativePath, 2)[0] ?? '';
-
-        if (preg_match('/^'.preg_quote($collectionType, '/').'-[0-9a-f]{24}$/i', $preparedDirectory) !== 1) {
-            return null;
-        }
-
-        return $normalizedRoot.'/'.$preparedDirectory;
+        return app(EmbyManagedSetupService::class)->preparedLibraryPath($this->ownerRecord, $path, $collectionType);
     }
 }

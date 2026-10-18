@@ -12,6 +12,7 @@ use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Playlist;
 use App\Models\PlaylistAuth;
+use App\Models\Season;
 use App\Models\Series;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -119,6 +120,39 @@ it('keeps TMDB enrichment on a series when the provider metadata is refreshed', 
         ->and($metadata['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list'])
         ->and($metadata['clearlogo'])->toBe(tmdbEnrichmentFixture()['clearlogo'])
         ->and($metadata['related_tmdb'])->toEqual(tmdbEnrichmentFixture()['related_tmdb']);
+});
+
+it('keeps the TMDB season trailer when the provider season info is refreshed', function () {
+    $playlist = xtreamPlaylistForEnrichment($this->user);
+    $series = Series::factory()->for($playlist)->for($this->user)->create([
+        'source_series_id' => '999',
+        'is_custom' => false,
+    ]);
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+        'metadata' => ['name' => 'Season 1', 'youtube_trailer' => 'https://www.youtube.com/watch?v=season1'],
+    ]);
+
+    Http::preventStrayRequests();
+    Http::fake([
+        '*action=get_series_info*' => Http::response([
+            'info' => ['name' => $series->name],
+            'seasons' => [['season_number' => 1, 'name' => 'Season One']],
+            'episodes' => [
+                '1' => [
+                    ['id' => 111, 'episode_num' => 1, 'title' => 'Pilot', 'container_extension' => 'mp4', 'info' => []],
+                ],
+            ],
+        ]),
+    ]);
+
+    expect($series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false))->toBeTrue();
+
+    expect($season->refresh()->metadata)
+        ->toMatchArray(['name' => 'Season One', 'youtube_trailer' => 'https://www.youtube.com/watch?v=season1']);
 });
 
 it('keeps the TMDB series rating and networks when the provider metadata is refreshed', function () {

@@ -243,7 +243,39 @@ class EmbyManagedSetupService
         return $separator !== false
             && $separator < strlen($normalizedPath) - 1
             && $this->remotePathsMatch(substr($normalizedPath, 0, $separator), $normalizedRoot)
-            && preg_match('/^'.preg_quote($collectionType, '/').'-[0-9a-f]{24}$/', substr($normalizedPath, $separator + 1)) === 1;
+            && $this->isPreparedDirectoryName(substr($normalizedPath, $separator + 1), $collectionType);
+    }
+
+    /**
+     * The companion-prepared library directory (under the managed root) that a mapping's
+     * output path lives in, or null when the path isn't inside one.
+     */
+    public function preparedLibraryPath(MediaServerIntegration $integration, string $path, string $collectionType): ?string
+    {
+        $root = $integration->emby_managed_setup_root;
+        if (! is_string($root)
+            || ! MediaServerIntegration::isSafeWritablePath($path)
+            || ! MediaServerIntegration::isPathWithinWritableRoot($path, $root)) {
+            return null;
+        }
+
+        $normalizedPath = rtrim(str_replace('\\', '/', $path), '/');
+        $normalizedRoot = rtrim(str_replace('\\', '/', $root), '/');
+        $relativePath = substr($normalizedPath, strlen($normalizedRoot) + 1);
+        $preparedDirectory = explode('/', $relativePath, 2)[0];
+
+        return $this->isPreparedDirectoryName($preparedDirectory, $collectionType)
+            ? $normalizedRoot.'/'.$preparedDirectory
+            : null;
+    }
+
+    /**
+     * Whether a directory name has the shape the companion gives prepared libraries.
+     * Case-insensitive, since a Windows media server can report the path back in any case.
+     */
+    private function isPreparedDirectoryName(string $directory, string $collectionType): bool
+    {
+        return preg_match('/^'.preg_quote($collectionType, '/').'-[0-9a-f]{24}$/i', $directory) === 1;
     }
 
     private function remotePathsMatch(string $left, string $right): bool

@@ -901,6 +901,7 @@ it('enriches episodes when series has complete metadata but episodes lack tmdb_i
         ], 200),
         // getSeasonDetails call
         'https://api.themoviedb.org/3/tv/224372/season/1*' => Http::response([
+            'id' => 22437201,
             'season_number' => 1,
             'poster_path' => '/season1.jpg',
             'episodes' => [
@@ -1021,6 +1022,7 @@ it('enriches episodes even when series is skipped due to complete metadata', fun
         ], 200),
         // getSeasonDetails call
         'https://api.themoviedb.org/3/tv/1396/season/1*' => Http::response([
+            'id' => 139601,
             'season_number' => 1,
             'poster_path' => '/bb_s1.jpg',
             'episodes' => [
@@ -2619,7 +2621,7 @@ it('looks up unmatched episodes again only when new episodes arrive or a week ha
         return [['season_number' => 1]];
     });
     // TMDB has nothing for this episode, so it stays without a tmdb_id.
-    $tmdb->shouldReceive('getSeasonDetails')->andReturn(['episodes' => [['episode_number' => 99, 'id' => 1]]]);
+    $tmdb->shouldReceive('getSeasonDetailsResult')->andReturn(['status' => 'found', 'payload' => ['episodes' => [['episode_number' => 99, 'id' => 1]]]]);
     $run = fn () => (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
 
     $run();
@@ -2639,7 +2641,7 @@ it('looks up unmatched episodes again only when new episodes arrive or a week ha
     expect($calls)->toBe(3);
 });
 
-it('looks up episodes again on the next run when a TMDB season lookup failed', function (array $seasons, ?array $seasonDetails) {
+it('looks up episodes again on the next run when a TMDB season lookup failed', function (?array $seasons, array $seasonDetails) {
     $series = Series::factory()->create([
         'playlist_id' => $this->playlist->id,
         'user_id' => $this->user->id,
@@ -2669,9 +2671,10 @@ it('looks up episodes again on the next run when a TMDB season lookup failed', f
 
     $tmdb = Mockery::mock(TmdbService::class);
     $tmdb->shouldReceive('isConfigured')->andReturn(true);
-    // getAllSeasons() returns [] on a failed request, and getSeasonDetails() null.
+    // getAllSeasons(nullOnError: true) returns null on a failed request, and
+    // getSeasonDetailsResult() an error status.
     $tmdb->shouldReceive('getAllSeasons')->twice()->andReturn($seasons);
-    $tmdb->shouldReceive('getSeasonDetails')->andReturn($seasonDetails);
+    $tmdb->shouldReceive('getSeasonDetailsResult')->andReturn($seasonDetails);
 
     foreach ([1, 2] as $run) {
         (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
@@ -2679,9 +2682,65 @@ it('looks up episodes again on the next run when a TMDB season lookup failed', f
 
     expect($series->fresh()->metadata)->not->toHaveKey('tmdb_episodes_checked_at');
 })->with([
-    'seasons request failed' => [[], null],
-    'season details request failed' => [[['season_number' => 1]], null],
+    'seasons request failed' => [null, ['status' => 'error']],
+    'season details request failed' => [[['season_number' => 1]], ['status' => 'error']],
 ]);
+
+it('does not look up episodes again when TMDB verifiably has no season data', function (array $seasons, array $seasonDetails) {
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Example Cartoon',
+        'tmdb_id' => 900105,
+        'plot' => 'Plot.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/cartoon.jpg',
+        'genre' => 'Animation, Action',
+        'metadata' => ['tmdb_id' => 900105, 'related_tmdb' => []],
+    ]);
+    $season = Season::factory()->create([
+        'series_id' => $series->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season_number' => 1,
+    ]);
+    Episode::factory()->create([
+        'series_id' => $series->id,
+        'season_id' => $season->id,
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'season' => 1,
+        'episode_num' => 1,
+        'tmdb_id' => null,
+        'info' => [],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('getAllSeasons')->once()->andReturn($seasons);
+    $tmdb->shouldReceive('getSeasonDetailsResult')->andReturn($seasonDetails);
+
+    foreach ([1, 2] as $run) {
+        (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
+    }
+
+    expect($series->fresh()->metadata)->toHaveKey('tmdb_episodes_checked_at');
+})->with([
+    'no seasons on TMDB' => [[], ['status' => 'error']],
+    'season not found on TMDB' => [[['season_number' => 1]], ['status' => 'not_found']],
+]);
+
+it('treats only a TMDB "resource not found" as no seasons when asked for failures', function () {
+    Http::fake([
+        'https://api.themoviedb.org/3/tv/404404*' => Http::response(['status_code' => 34, 'status_message' => 'Not found.'], 404),
+        'https://api.themoviedb.org/3/tv/500500*' => Http::response([], 500),
+    ]);
+
+    $tmdb = app(TmdbService::class);
+
+    expect($tmdb->getAllSeasons(404404, nullOnError: true))->toBe([])
+        ->and($tmdb->getAllSeasons(500500, nullOnError: true))->toBeNull()
+        ->and($tmdb->getAllSeasons(500500))->toBe([]);
+});
 
 it('keeps the TMDB lookup markers through a provider metadata refresh', function () {
     $existing = [

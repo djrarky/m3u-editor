@@ -3067,12 +3067,18 @@ class TmdbService
      * `append_to_response=season/N` - TMDB caps appends at 20 per request, so
      * anything past that is ignored rather than costing extra calls.
      *
+     * Pass $nullOnError to get null (instead of []) when the lookup failed, so a
+     * caller can tell a failure apart from a series TMDB verifiably has no seasons
+     * for (an empty season list, or TMDB's "resource not found").
+     *
      * @param  int  $tmdbId  The TMDB ID of the TV series
      * @param  array<int, int>  $withEpisodesFor  Season numbers to attach episodes for
-     * @return array Array of season data
+     * @return array|null Array of season data, or null on failure when $nullOnError is set
      */
-    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = []): array
+    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = [], bool $nullOnError = false): ?array
     {
+        $failed = $nullOnError ? null : [];
+
         $this->waitForRateLimit();
 
         $appendSeasons = array_slice(array_values(array_unique($withEpisodesFor)), 0, 20);
@@ -3087,16 +3093,23 @@ class TmdbService
                 ], fn ($value) => $value !== '')
             );
 
+            if ($response->status() === 404 && $this->isTmdbResourceNotFound($response->json())) {
+                return [];
+            }
+
             if (! $response->successful()) {
                 Log::warning('TMDB: Failed to get TV series for seasons', [
                     'tmdb_id' => $tmdbId,
                     'status' => $response->status(),
                 ]);
 
-                return [];
+                return $failed;
             }
 
             $data = $response->json();
+            if (! is_array($data['seasons'] ?? null)) {
+                return $failed;
+            }
 
             return array_map(function ($season) use ($data) {
                 $appended = $data['season/'.($season['season_number'] ?? '')] ?? null;
@@ -3105,14 +3118,14 @@ class TmdbService
                 }
 
                 return $season;
-            }, $data['seasons'] ?? []);
+            }, $data['seasons']);
         } catch (\Exception $e) {
             Log::error('TMDB get all seasons error', [
                 'tmdb_id' => $tmdbId,
                 'error' => $e->getMessage(),
             ]);
 
-            return [];
+            return $failed;
         }
     }
 }

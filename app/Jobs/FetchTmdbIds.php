@@ -1268,14 +1268,22 @@ class FetchTmdbIds implements ShouldQueue
             'tmdb_id' => $tmdbId,
         ]);
 
-        // Get all seasons from TMDB
-        $seasons = $tmdb->getAllSeasons($tmdbId);
+        // Get all seasons from TMDB (null when the lookup failed)
+        $seasons = $tmdb->getAllSeasons($tmdbId, nullOnError: true);
 
-        if (empty($seasons)) {
+        if ($seasons === null) {
+            return;
+        }
+
+        if ($seasons === []) {
             Log::debug('FetchTmdbIds: No seasons found for series', [
                 'series_id' => $series->id,
                 'tmdb_id' => $tmdbId,
             ]);
+
+            // TMDB verifiably has no seasons, so there is nothing to look up until the
+            // weekly re-check or new episodes arrive.
+            $this->markSeriesEpisodesChecked($series);
 
             return;
         }
@@ -1293,14 +1301,17 @@ class FetchTmdbIds implements ShouldQueue
                 continue;
             }
 
-            // Fetch detailed season data with episodes
-            $seasonDetails = $tmdb->getSeasonDetails($tmdbId, $seasonNumber);
+            // Fetch detailed season data with episodes. A season TMDB lists but verifiably
+            // has no entry for counts as checked; only a failed lookup is retried.
+            $seasonResult = $tmdb->getSeasonDetailsResult($tmdbId, $seasonNumber);
 
-            if (! $seasonDetails) {
+            if ($seasonResult['status'] === 'error') {
                 $allSeasonsFetched = false;
 
                 continue;
             }
+
+            $seasonDetails = $seasonResult['payload'] ?? [];
 
             if (empty($seasonDetails['episodes'])) {
                 continue;

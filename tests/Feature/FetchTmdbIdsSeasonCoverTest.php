@@ -40,16 +40,16 @@ class FakeTmdbService extends TmdbService
         ];
     }
 
-    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = []): array
+    public function getAllSeasons(int $tmdbId, array $withEpisodesFor = [], bool $nullOnError = false): ?array
     {
         return [
             ['season_number' => 1],
         ];
     }
 
-    public function getSeasonDetails(int $tmdbId, int $seasonNumber): ?array
+    public function getSeasonDetailsResult(int $tmdbId, int $seasonNumber): array
     {
-        return [
+        return ['status' => 'found', 'payload' => [
             'poster_path' => '/poster.jpg',
             'youtube_trailer' => 'https://www.youtube.com/watch?v=season1',
             'episodes' => [
@@ -63,7 +63,7 @@ class FakeTmdbService extends TmdbService
                     'vote_average' => 8.2,
                 ],
             ],
-        ];
+        ]];
     }
 }
 

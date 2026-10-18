@@ -375,7 +375,8 @@ class ProcessEpgImport implements ShouldQueue
                 // Parse errors are suppressed above, so an HTML error page or other non-XMLTV
                 // body reads as zero channels. Completing that import would delete every
                 // existing EPG channel and its mappings, so fail and keep the current data.
-                if ($channelCount === 0 && $epg->channels()->exists()) {
+                $hasExistingChannels = $epg->channels()->exists();
+                if ($channelCount === 0 && $hasExistingChannels) {
                     $this->failImport('No channels found in the EPG file. The source may have returned an error page instead of XMLTV guide data. The existing EPG data was kept.', $batchNo);
 
                     return;
@@ -384,7 +385,7 @@ class ProcessEpgImport implements ShouldQueue
                 // A file that stops partway through would replace the guide with a shorter one.
                 // Keep the existing guide when there is one; a new EPG still imports what parsed,
                 // so a feed that is always malformed at some point still gives a partial guide.
-                if (! $readToEnd && $epg->channels()->exists()) {
+                if (! $readToEnd && $hasExistingChannels) {
                     $xmlError = libxml_get_last_error();
                     $detail = $xmlError ? " (line {$xmlError->line}: ".trim($xmlError->message).')' : '';
                     $this->failImport("The EPG file ended early or is malformed{$detail}. The existing EPG data was kept.", $batchNo);
