@@ -2471,8 +2471,40 @@ it('runs the VOD library-name genre check only once per title', function () {
         (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
     }
 
-    expect($channel->fresh()->info['tmdb_genre_checked'])->toBeTrue()
+    expect($channel->fresh()->info['tmdb_genre_checked'])->toBe('Drama')
         ->and($channel->fresh()->info['genre'])->toBe('Drama');
+});
+
+it('checks the VOD genre again when a provider refresh sets it back to a library name', function () {
+    $channel = Channel::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'is_vod' => true,
+        'title' => 'An Action Film',
+        'tmdb_id' => 4244,
+        'info' => [
+            'tmdb_id' => 4244,
+            'plot' => 'Plot.',
+            'cover_big' => 'https://image.tmdb.org/t/p/w500/action.jpg',
+            'genre' => 'Movies',
+            'related_tmdb' => [],
+        ],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('getMovieDetails')->twice()->with(4244)->andReturn(['genres' => 'Action']);
+    $run = fn () => (new TestableFetchTmdbIds(vodChannelIds: [$channel->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
+
+    $run();
+    $run();
+    expect($channel->fresh()->info['genre'])->toBe('Action');
+
+    // A provider refresh replaces info (the marker is carried over) and restores the placeholder.
+    $channel->update(['info' => array_merge($channel->fresh()->info, ['genre' => 'Movies'])]);
+    $run();
+
+    expect($channel->fresh()->info)->toMatchArray(['genre' => 'Action', 'tmdb_genre_checked' => 'Action']);
 });
 
 it('retries the VOD genre check when the TMDB lookup failed', function () {
@@ -2693,8 +2725,36 @@ it('runs the series library-name genre check only once per series', function () 
         (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
     }
 
-    expect($series->fresh()->metadata['tmdb_genre_checked'])->toBeTrue()
+    expect($series->fresh()->metadata['tmdb_genre_checked'])->toBe('Drama')
         ->and($series->fresh()->genre)->toBe('Drama');
+});
+
+it('checks the series genre again when a provider refresh sets it back to a library name', function () {
+    $series = Series::factory()->create([
+        'playlist_id' => $this->playlist->id,
+        'user_id' => $this->user->id,
+        'name' => 'Example Action Show',
+        'tmdb_id' => 900105,
+        'plot' => 'Plot.',
+        'cover' => 'https://image.tmdb.org/t/p/w500/action.jpg',
+        'genre' => 'Shows',
+        'metadata' => ['tmdb_id' => 900105, 'related_tmdb' => []],
+    ]);
+
+    $tmdb = Mockery::mock(TmdbService::class);
+    $tmdb->shouldReceive('isConfigured')->andReturn(true);
+    $tmdb->shouldReceive('getTvSeriesDetails')->twice()->with(900105)->andReturn(['genres' => 'Action']);
+    $run = fn () => (new TestableFetchTmdbIds(seriesIds: [$series->id], overwriteExisting: false, user: $this->user))->handle($tmdb);
+
+    $run();
+    $run();
+    expect($series->fresh()->genre)->toBe('Action');
+
+    $series->fresh()->update(['genre' => 'Shows']);
+    $run();
+
+    expect($series->fresh()->genre)->toBe('Action')
+        ->and($series->fresh()->metadata['tmdb_genre_checked'])->toBe('Action');
 });
 
 class TestableFetchTmdbIds extends FetchTmdbIds

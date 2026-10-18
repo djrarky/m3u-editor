@@ -367,3 +367,63 @@ it('keeps TMDB-owned series columns over the provider refresh when TMDB is prefe
         ->and($series->metadata['vote_count'])->toBe(15000)
         ->and($series->metadata['cast_list'])->toEqual(tmdbEnrichmentFixture()['cast_list']);
 });
+
+it('keeps the TMDB-filled VOD plot and cover when the provider refresh sends them blank', function (array $existingInfo, array $expected) {
+    $playlist = xtreamPlaylistForEnrichment($this->user);
+    $channel = Channel::factory()->for($playlist)->for($this->user)->create([
+        'is_vod' => true,
+        'source_id' => 'vod-1',
+        'last_metadata_fetch' => now(),
+        'info' => $existingInfo,
+    ]);
+
+    $xtream = new class
+    {
+        public function getVodInfo(string $vodId, int $timeout = 60): array
+        {
+            return ['info' => ['plot' => '', 'cover_big' => null, 'genre' => 'Drama']];
+        }
+    };
+
+    $channel->fetchMetadata($xtream, refresh: true, skipTmdb: true);
+
+    $info = $channel->refresh()->info;
+    expect($info['plot'])->toBe($expected['plot'])
+        ->and($info['cover_big'])->toBe($expected['cover_big']);
+})->with([
+    'TMDB-checked: TMDB values kept' => [
+        ['plot' => 'TMDB plot', 'cover_big' => 'https://image.tmdb.org/t/p/w500/poster.jpg', 'related_tmdb' => []],
+        ['plot' => 'TMDB plot', 'cover_big' => 'https://image.tmdb.org/t/p/w500/poster.jpg'],
+    ],
+    'never TMDB-checked: provider blanks win' => [
+        ['plot' => 'Old plot', 'cover_big' => 'http://xtream.test/old.jpg'],
+        ['plot' => '', 'cover_big' => null],
+    ],
+]);
+
+it('keeps the TMDB-filled series plot and cover when the provider refresh sends them blank', function () {
+    $playlist = xtreamPlaylistForEnrichment($this->user);
+    $series = Series::factory()->for($playlist)->for($this->user)->create([
+        'source_series_id' => '999',
+        'is_custom' => false,
+        'plot' => 'TMDB plot',
+        'cover' => 'https://image.tmdb.org/t/p/w500/poster.jpg',
+        'metadata' => ['related_tmdb' => []],
+    ]);
+
+    Http::preventStrayRequests();
+    Http::fake([
+        '*action=get_series_info*' => Http::response([
+            'info' => ['name' => $series->name, 'plot' => '', 'cover' => '', 'genre' => 'Drama'],
+            'seasons' => [],
+            'episodes' => [],
+        ]),
+    ]);
+
+    $series->fetchMetadata(refresh: true, sync: false, dispatchTmdb: false);
+
+    $series->refresh();
+    expect($series->plot)->toBe('TMDB plot')
+        ->and($series->cover)->toBe('https://image.tmdb.org/t/p/w500/poster.jpg')
+        ->and($series->genre)->toBe('Drama');
+});

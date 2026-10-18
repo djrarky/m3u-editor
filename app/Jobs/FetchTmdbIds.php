@@ -565,15 +565,16 @@ class FetchTmdbIds implements ShouldQueue
             }
 
             // Check if genre/group needs TMDB enrichment (e.g., still set to library folder name).
-            // Done once per channel: tmdb_genre_checked records that TMDB's genres were compared,
-            // so a genuine single-genre title isn't re-fetched from TMDB on every sync.
+            // Done once per genre: tmdb_genre_checked holds the genre left after TMDB's genres were
+            // compared, so a genuine single-genre title isn't re-fetched from TMDB on every sync,
+            // but one a provider refresh set back to a library name is checked again.
             $currentGenre = $info['genre'] ?? $channel->group ?? '';
             if (! empty($currentGenre) && ! str_contains($currentGenre, ',') && strlen($currentGenre) <= 20
-                && empty($info['tmdb_genre_checked'])) {
+                && ($info['tmdb_genre_checked'] ?? null) !== $currentGenre) {
                 $details = $tmdb->getMovieDetails((int) $tmdbId);
                 $genreUpdated = false;
                 if ($details) {
-                    $info['tmdb_genre_checked'] = true;
+                    $info['tmdb_genre_checked'] = $currentGenre;
                 }
                 if ($details && ! empty($details['genres'])) {
                     $tmdbGenres = is_string($details['genres'])
@@ -588,6 +589,7 @@ class FetchTmdbIds implements ShouldQueue
                         ]);
 
                         $info['genre'] = $details['genres'];
+                        $info['tmdb_genre_checked'] = $details['genres'];
                         $updateData = ['info' => $info];
 
                         if ($this->autoCreateGroups) {
@@ -947,15 +949,15 @@ class FetchTmdbIds implements ShouldQueue
             // Check if genre needs TMDB enrichment (e.g., still set to library folder name)
             // A TMDB-enriched genre typically contains a comma (multiple genres) or matches known TMDB genres.
             // If the genre is a single short word that doesn't contain a comma, it's likely a library name placeholder.
-            // Done once per series (tmdb_genre_checked), as for VOD.
+            // Done once per genre (tmdb_genre_checked), as for VOD.
             if ($existingTmdbId && ! empty($series->genre) && ! str_contains($series->genre, ',') && strlen($series->genre) <= 20
-                && empty($seriesMetadataArr['tmdb_genre_checked'])) {
+                && ($seriesMetadataArr['tmdb_genre_checked'] ?? null) !== $series->genre) {
                 // Fetch TMDB details to check if the current genre matches a TMDB genre
                 $details = $tmdb->getTvSeriesDetails((int) $existingTmdbId);
                 // Read after processSeriesEpisodes() above, which may have stamped tmdb_episodes_checked_at.
                 $genreMetadata = is_array($series->metadata) ? $series->metadata : [];
                 if ($details) {
-                    $genreMetadata['tmdb_genre_checked'] = true;
+                    $genreMetadata['tmdb_genre_checked'] = $series->genre;
                 }
                 $genreUpdate = $details ? ['metadata' => $genreMetadata] : [];
                 if ($details && ! empty($details['genres'])) {
@@ -972,7 +974,8 @@ class FetchTmdbIds implements ShouldQueue
                             'tmdb_genres' => $details['genres'],
                         ]);
 
-                        $updateData = ['genre' => $details['genres']] + $genreUpdate;
+                        $genreMetadata['tmdb_genre_checked'] = $details['genres'];
+                        $updateData = ['genre' => $details['genres'], 'metadata' => $genreMetadata];
 
                         // Update category to match the primary TMDB genre
                         if ($this->autoCreateGroups) {

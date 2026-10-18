@@ -365,6 +365,15 @@ class Series extends Model
                                 }
                             }
                         }
+
+                        // A blank provider plot/cover doesn't wipe the one TMDB filled in.
+                        if (TmdbEnrichment::isTmdbChecked($this->metadata)) {
+                            foreach (TmdbEnrichment::TMDB_FILLED_KEYS as $column) {
+                                if (array_key_exists($column, $update) && blank($update[$column]) && ! blank($this->{$column})) {
+                                    unset($update[$column]);
+                                }
+                            }
+                        }
                     }
                 }
 
