@@ -59,7 +59,7 @@ beforeEach(function () {
  * request host, and the cached proxy singleton, which resolves its base URL
  * once on construction.
  */
-function useDvrUrlOverride(?string $override = null): void
+function useXtreamDvrUrlOverride(?string $override = null): void
 {
     config([
         'app.url' => 'http://192.168.1.50',
@@ -74,7 +74,7 @@ function useDvrUrlOverride(?string $override = null): void
 /**
  * Call get_dvr_recordings the way a client on the LAN would, on host:port.
  */
-function dvrRecordingsResponse($test): array
+function xtreamDvrUrlRecordingsResponse($test): array
 {
     $url = 'http://192.168.1.50:36400/player_api.php?'.http_build_query([
         'username' => 'dvr-user',
@@ -85,7 +85,7 @@ function dvrRecordingsResponse($test): array
     return $test->postJson($url)->assertOk()->json();
 }
 
-function makeDvrRecording($test, DvrRecordingStatus $status): DvrRecording
+function makeXtreamDvrUrlRecording($test, DvrRecordingStatus $status): DvrRecording
 {
     return DvrRecording::factory()
         ->for($test->setting, 'dvrSetting')
@@ -101,30 +101,30 @@ function makeDvrRecording($test, DvrRecordingStatus $status): DvrRecording
 }
 
 it('builds completed recording stream and edl urls on the host and port the client used', function () {
-    useDvrUrlOverride();
-    $recording = makeDvrRecording($this, DvrRecordingStatus::Completed);
+    useXtreamDvrUrlOverride();
+    $recording = makeXtreamDvrUrlRecording($this, DvrRecordingStatus::Completed);
 
-    $item = dvrRecordingsResponse($this)[0];
+    $item = xtreamDvrUrlRecordingsResponse($this)[0];
 
     expect($item['stream_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}.mp4")
         ->and($item['edl_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}/edl");
 });
 
 it('builds in-progress recording live urls on the host and port the client used', function () {
-    useDvrUrlOverride();
-    $recording = makeDvrRecording($this, DvrRecordingStatus::Recording);
+    useXtreamDvrUrlOverride();
+    $recording = makeXtreamDvrUrlRecording($this, DvrRecordingStatus::Recording);
 
-    $item = dvrRecordingsResponse($this)[0];
+    $item = xtreamDvrUrlRecordingsResponse($this)[0];
 
     expect($item['live_url'])->toBe("http://192.168.1.50:36400/dvr/dvr-user/dvr-pass/{$recording->uuid}/live.m3u8")
         ->and($item['stream_url'])->toBeNull();
 });
 
 it('uses the url override for recording urls when one is set', function () {
-    useDvrUrlOverride('https://tv.example.com/');
-    $recording = makeDvrRecording($this, DvrRecordingStatus::Completed);
+    useXtreamDvrUrlOverride('https://tv.example.com/');
+    $recording = makeXtreamDvrUrlRecording($this, DvrRecordingStatus::Completed);
 
-    $item = dvrRecordingsResponse($this)[0];
+    $item = xtreamDvrUrlRecordingsResponse($this)[0];
 
     expect($item['stream_url'])->toBe("https://tv.example.com/dvr/dvr-user/dvr-pass/{$recording->uuid}.mp4");
 });
