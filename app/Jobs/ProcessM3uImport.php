@@ -8,6 +8,7 @@ use App\Enums\SyncRunPhase;
 use App\Events\SyncCompleted;
 use App\Models\Bouquet;
 use App\Models\Category;
+use App\Models\Channel;
 use App\Models\Group;
 use App\Models\Job;
 use App\Models\MediaServerIntegration;
@@ -1506,9 +1507,7 @@ class ProcessM3uImport implements ShouldQueue
         }
 
         // Flag any previously marked new items as not new
-        $playlist->groups()->where('new', true)->update(['new' => false]);
-        $playlist->channels()->where('new', true)->update(['new' => false]);
-        $playlist->series()->where('new', true)->update(['new' => false]);
+        $this->clearPreviousNewFlags($playlist, $batchNo);
 
         // Create the jobs array
         $jobs = [];
@@ -1851,6 +1850,102 @@ class ProcessM3uImport implements ShouldQueue
     }
 
     /**
+     * Prepare a chunk's upsert rows for channels the provider moved between categories.
+     *
+     * Xtream channels are keyed by stream_id, so a channel moved by the provider keeps its
+     * row, and `group_id` is left out of the upsert so manual moves survive a sync.
+     *
+     * - Streams an earlier category already imported this run are dropped from the rows, so
+     *   the first category listing a stream owns its row and `group_internal` names it.
+     * - Any other existing row in a different group is moved here when that group is missing,
+     *   soft-deleted, or still the provider group it was last imported into. A channel the
+     *   user moved to another group fails that check and stays put.
+     * - Nothing is moved into a blank category: it can't be told apart from a failed or
+     *   partial category lookup, which would pull every channel into one group.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    public static function applyProviderGroupMoves(
+        int $playlistId,
+        int $groupId,
+        ?string $groupName,
+        array $rows,
+        string $batchNo,
+    ): array {
+        $sourceIds = array_values(array_filter(
+            array_map(fn (array $row): string => (string) ($row['source_id'] ?? ''), $rows),
+            fn (string $sourceId): bool => $sourceId !== '',
+        ));
+        if ($sourceIds === []) {
+            return $rows;
+        }
+
+        $existing = Channel::query()
+            ->leftJoin('groups', 'groups.id', '=', 'channels.group_id')
+            ->where('channels.playlist_id', $playlistId)
+            ->where('channels.is_custom', false)
+            ->whereIn('channels.source_id', $sourceIds)
+            ->get([
+                'channels.id',
+                'channels.source_id',
+                'channels.group_id',
+                'channels.group_internal',
+                'channels.import_batch_no',
+                'groups.id as current_group_id',
+                'groups.deleted_at as group_deleted_at',
+                'groups.custom as group_custom',
+                'groups.name_internal as group_name_internal',
+            ]);
+
+        $importedThisRun = $existing->where('import_batch_no', $batchNo)
+            ->map(fn (Channel $channel): string => (string) $channel->source_id)
+            ->all();
+        if ($importedThisRun !== []) {
+            $rows = array_values(array_filter(
+                $rows,
+                fn (array $row): bool => ! in_array((string) ($row['source_id'] ?? ''), $importedThisRun, true),
+            ));
+        }
+
+        if (($rows[0]['group_internal'] ?? '') === '') {
+            return $rows;
+        }
+
+        $movedIds = $existing
+            ->filter(fn (Channel $channel): bool => $channel->import_batch_no !== $batchNo
+                && $channel->group_id !== $groupId
+                && ($channel->current_group_id === null
+                    || $channel->group_deleted_at !== null
+                    || (! $channel->group_custom && $channel->group_name_internal === $channel->group_internal)))
+            ->pluck('id');
+        if ($movedIds->isNotEmpty()) {
+            Channel::whereIn('id', $movedIds)->update([
+                'group_id' => $groupId,
+                'group' => $groupName,
+            ]);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Clear the `new` flag left over from the previous sync.
+     *
+     * Groups are created or restored (new = true) before this runs, and every group seen
+     * this run already carries the current batch number, so those are left alone.
+     */
+    private function clearPreviousNewFlags(Playlist $playlist, string $batchNo): void
+    {
+        $playlist->groups()
+            ->where('new', true)
+            ->where(fn ($query) => $query->whereNull('import_batch_no')->orWhere('import_batch_no', '!=', $batchNo))
+            ->update(['new' => false]);
+        $playlist->channels()->where('new', true)->update(['new' => false]);
+        $playlist->series()->where('new', true)->update(['new' => false]);
+    }
+
+    /**
      * Process the channel collection
      */
     private function processChannelCollection(
@@ -2012,9 +2107,7 @@ class ProcessM3uImport implements ShouldQueue
 
         // Flag any previously marked new items as not new, so only genuinely
         // new channels (inserted, not updated) carry new=true after this run.
-        $playlist->groups()->where('new', true)->update(['new' => false]);
-        $playlist->channels()->where('new', true)->update(['new' => false]);
-        $playlist->series()->where('new', true)->update(['new' => false]);
+        $this->clearPreviousNewFlags($playlist, $batchNo);
 
         // Create the jobs array
         $jobs = [];
