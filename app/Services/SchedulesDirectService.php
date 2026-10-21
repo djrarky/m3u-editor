@@ -14,12 +14,14 @@ use Exception;
 use Generator;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use JsonMachine\Items;
+use Throwable;
 
 /**
  * Service to interact with the SchedulesDirect API for EPG data.
@@ -273,6 +275,13 @@ class SchedulesDirectService
                     } else {
                         throw new Exception('Empty or invalid response received');
                     }
+                } catch (SchedulesDirectTokenExpiredException $e) {
+                    // Every later request would fail too; let syncEpgData() log in again.
+                    throw $e;
+                } catch (SchedulesDirectServerException $e) {
+                    if ($retry === self::MAX_RETRIES - 1) {
+                        throw $e;
+                    }
                 } catch (Exception $e) {
                     if ($retry === self::MAX_RETRIES - 1) {
                         Log::error("Max retries exceeded for chunk {$chunkNumber}, skipping");
@@ -290,22 +299,27 @@ class SchedulesDirectService
      *
      * Schedules Direct returns `tokenExpires` as the UNIX epoch at which the
      * token stops working. `datetime` / `serverTime` are the server's current
-     * clock and must never be treated as an expiry. When `tokenExpires` is
-     * absent we fall back to the documented 24-hour lifetime. A small skew
-     * margin is subtracted so a request never leaves with a token that lapses
-     * in flight.
+     * clock and must never be treated as an expiry. When `serverTime` is
+     * present the remaining lifetime is measured on SD's clock, so a local
+     * clock that runs behind cannot keep using a token SD has already expired.
+     * When `tokenExpires` is absent we fall back to the documented 24-hour
+     * lifetime. A small skew margin is subtracted so a request never leaves
+     * with a token that lapses in flight.
      *
      * @param  array<string, mixed>  $data
      */
     private function resolveTokenExpiry(array $data): Carbon
     {
         $tokenExpires = $data['tokenExpires'] ?? null;
+        $serverTime = $data['serverTime'] ?? null;
 
-        // Carbon 3 returns a UTC instance from a bare timestamp; pin it to the
-        // app timezone so it round-trips through the tz-naive datetime column.
-        $expiresAt = is_numeric($tokenExpires)
-            ? Carbon::createFromTimestamp((int) $tokenExpires, config('app.timezone'))
-            : now()->addDay();
+        $expiresAt = match (true) {
+            is_numeric($tokenExpires) && is_numeric($serverTime) => now()->addSeconds(max(0, (int) $tokenExpires - (int) $serverTime)),
+            // Carbon 3 returns a UTC instance from a bare timestamp; pin it to the
+            // app timezone so it round-trips through the tz-naive datetime column.
+            is_numeric($tokenExpires) => Carbon::createFromTimestamp((int) $tokenExpires, config('app.timezone')),
+            default => now()->addDay(),
+        };
 
         return $expiresAt->subSeconds(self::TOKEN_EXPIRY_SKEW_SECONDS);
     }
@@ -730,6 +744,35 @@ class SchedulesDirectService
         }
 
         Epg::query()->where('sd_token', $token)->update(['sd_token' => null, 'sd_token_expires_at' => null]);
+    }
+
+    /**
+     * Handle TOKEN_EXPIRED (4006) from any endpoint: discard the token everywhere
+     * it is stored and throw, so syncEpgData() logs in once and retries the sync.
+     *
+     * @param  array<string, mixed>  $body  the 4006 response body
+     *
+     * @throws SchedulesDirectTokenExpiredException always
+     */
+    private function throwTokenExpired(?string $token, array $body, string $endpoint): never
+    {
+        $storedExpiry = $this->currentEpg?->sd_token_expires_at;
+
+        $this->forgetToken($token);
+        if ($this->currentEpg && $this->currentEpg->sd_token === $token) {
+            $this->currentEpg->forceFill(['sd_token' => null, 'sd_token_expires_at' => null])->syncOriginalAttributes(['sd_token', 'sd_token_expires_at']);
+        }
+
+        Log::warning('SchedulesDirect token expired (4006); cleared stored token', [
+            'endpoint' => $endpoint,
+            'epg_id' => $this->currentEpg?->id,
+            'stored_expires_at' => $storedExpiry?->toIso8601String(),
+            // A large gap between these means the local clock disagrees with SD's.
+            'server_time' => $body['serverTime'] ?? null,
+            'local_time' => now()->getTimestamp(),
+        ]);
+
+        throw new SchedulesDirectTokenExpiredException('SchedulesDirect token expired (Code: 4006)');
     }
 
     /**
@@ -1163,6 +1206,8 @@ class SchedulesDirectService
             ]);
 
             return $allArtwork;
+        } catch (SchedulesDirectTokenExpiredException $e) {
+            throw $e;
         } catch (Exception $e) {
             Log::error('Exception while fetching program artwork', [
                 'error' => $e->getMessage(),
@@ -1199,13 +1244,17 @@ class SchedulesDirectService
             $artworkData = $response->json();
 
             // Handle code 2055: debug not enabled - disable sd_debug and retry without debug header
-            if (isset($artworkData['code']) && $artworkData['code'] === self::DEBUG_NOT_ENABLED_CODE) {
+            if (($artworkData['code'] ?? null) === self::DEBUG_NOT_ENABLED_CODE) {
                 $this->handleDebugNotEnabledError();
 
                 // Retry the request without the debug header
                 Log::debug('Retrying artwork request without debug header');
                 $response = Http::withHeaders($this->buildHeaders($token))->timeout(30)->post(self::BASE_URL.'/'.self::API_VERSION.'/metadata/programs/', $batch);
                 $artworkData = $response->json();
+            }
+
+            if (($artworkData['code'] ?? null) === self::TOKEN_EXPIRED_CODE) {
+                $this->throwTokenExpired($token, $artworkData, '/metadata/programs/');
             }
 
             if ($response->successful() && is_array($artworkData)) {
@@ -1722,13 +1771,10 @@ class SchedulesDirectService
         array $stationIds,
         array $dates
     ): string {
-        // Prepare file path
+        // Write to a partial file and swap it in only once it is complete, so a
+        // failed sync keeps serving the existing guide instead of a truncated one.
         $filePath = Storage::disk('local')->path($epg->file_path);
-
-        // Remove old file if exists
-        if (Storage::disk('local')->exists($epg->file_path)) {
-            Storage::disk('local')->delete($epg->file_path);
-        }
+        $partialPath = $filePath.'.partial';
 
         // Ensure directory exists
         if (! Storage::disk('local')->exists($epg->folder_path)) {
@@ -1736,10 +1782,11 @@ class SchedulesDirectService
         }
 
         // Open file for writing
-        $file = fopen($filePath, 'w');
+        $file = fopen($partialPath, 'w');
         if (! $file) {
-            throw new Exception("Cannot open file for writing: {$filePath}");
+            throw new Exception("Cannot open file for writing: {$partialPath}");
         }
+        $completed = false;
         try {
             // Extract station artwork from lineup data (logos are included in lineup response)
             Log::debug('Extracting station artwork from lineup data');
@@ -1753,6 +1800,7 @@ class SchedulesDirectService
 
             // Write XML footer
             fwrite($file, "</tv>\n");
+            $completed = true;
         } catch (Exception $e) {
             Log::error('Failed to stream process to XMLTV', [
                 'epg_id' => $epg->id,
@@ -1763,7 +1811,14 @@ class SchedulesDirectService
             throw $e;
         } finally {
             fclose($file);
+            if (! $completed && file_exists($partialPath)) {
+                unlink($partialPath);
+            }
             $epg->update(['sd_progress' => 100]);
+        }
+
+        if (! rename($partialPath, $filePath)) {
+            throw new Exception("Cannot replace the EPG file: {$filePath}");
         }
 
         return $filePath;
@@ -1847,6 +1902,7 @@ class SchedulesDirectService
         // and sd_progress updates stay bounded regardless of sd_days_to_import.
         $progressStep = 0;
         $totalProgramsWritten = 0;
+        $totalProgramIds = 0;
         foreach ($this->processScheduleChunks($epg->sd_token, $stationIds, $dates) as $scheduleChunk) {
             $subChunkSize = max(1, (int) ceil(count($scheduleChunk) / self::PROGRESS_STEPS_PER_BATCH));
             foreach (array_chunk($scheduleChunk, $subChunkSize) as $scheduleSubChunk) {
@@ -1883,6 +1939,8 @@ class SchedulesDirectService
                     'unique_program_ids' => $programCount,
                 ]);
 
+                $totalProgramIds += $programCount;
+
                 // Fetch programs for this sub-chunk only using streaming batches
                 if ($programCount > 0) {
                     Log::debug('Fetching programs for sub-chunk', [
@@ -1899,6 +1957,8 @@ class SchedulesDirectService
                             'programs_written' => $chunkProgramsWritten,
                             'total_programs_written' => $totalProgramsWritten,
                         ]);
+                    } catch (SchedulesDirectTokenExpiredException|SchedulesDirectServerException $e) {
+                        throw $e;
                     } catch (Exception $e) {
                         Log::error('Error processing sub-chunk programs', [
                             'step' => $progressStep,
@@ -1933,6 +1993,12 @@ class SchedulesDirectService
             'total_programs_written' => $totalProgramsWritten,
             'steps_processed' => $progressStep,
         ]);
+
+        // Schedules listed programmes but none could be fetched: replacing the
+        // guide would leave every channel empty while the sync reports success.
+        if ($totalProgramIds > 0 && $totalProgramsWritten === 0) {
+            throw new Exception('SchedulesDirect returned no programmes; keeping the existing EPG data');
+        }
     }
 
     /**
@@ -2008,18 +2074,24 @@ class SchedulesDirectService
 
             // Stream the API response directly to a file
             $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
+            $errorData = $this->sinkedErrorBody($response, $tempResponseFile);
 
             // Check for error code 2055 in the response file (API returns error as JSON even on failure)
-            if (! $response->successful() && file_exists($tempResponseFile)) {
-                $errorContent = file_get_contents($tempResponseFile);
-                $errorData = json_decode($errorContent, true);
-                if (isset($errorData['code']) && $errorData['code'] === self::DEBUG_NOT_ENABLED_CODE) {
-                    $this->handleDebugNotEnabledError();
+            if (($errorData['code'] ?? null) === self::DEBUG_NOT_ENABLED_CODE) {
+                $this->handleDebugNotEnabledError();
 
-                    // Retry the request without the debug header
-                    Log::debug('Retrying program batch request without debug header');
-                    $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
-                }
+                // Retry the request without the debug header
+                Log::debug('Retrying program batch request without debug header');
+                $response = Http::withHeaders($this->buildHeaders($token))->timeout(300)->sink($tempResponseFile)->post(self::BASE_URL.'/'.self::API_VERSION.'/programs', $programBatch);
+                $errorData = $this->sinkedErrorBody($response, $tempResponseFile);
+            }
+
+            if (($errorData['code'] ?? null) === self::TOKEN_EXPIRED_CODE) {
+                $this->throwTokenExpired($token, $errorData, '/programs');
+            }
+
+            if ($response->serverError()) {
+                throw new SchedulesDirectServerException("SchedulesDirect /programs request failed with HTTP {$response->status()}", $response->status());
             }
 
             if ($response->successful()) {
@@ -2068,6 +2140,10 @@ class SchedulesDirectService
                     'status' => $response->status(),
                 ]);
             }
+        } catch (SchedulesDirectTokenExpiredException|SchedulesDirectServerException $e) {
+            throw $e;
+        } catch (ConnectionException $e) {
+            throw new SchedulesDirectServerException("SchedulesDirect /programs request failed: {$e->getMessage()}", 0, $e);
         } catch (Exception $e) {
             Log::error('Error processing program batch directly', [
                 'chunk' => $chunkIndex,
@@ -2080,6 +2156,33 @@ class SchedulesDirectService
                 unlink($tempResponseFile);
             }
         }
+    }
+
+    /**
+     * Whether a failed request is worth repeating: a timeout or connection error,
+     * or a 5xx response. A 4xx response carries an SD error code that a repeat
+     * cannot change.
+     */
+    private static function isTransientFailure(Throwable $exception): bool
+    {
+        return ! $exception instanceof RequestException || $exception->response->serverError();
+    }
+
+    /**
+     * The decoded JSON error body of a failed request whose body was streamed to
+     * $sinkFile, or an empty array for a successful or non-JSON response.
+     *
+     * @return array<string, mixed>
+     */
+    private function sinkedErrorBody(Response $response, string $sinkFile): array
+    {
+        if ($response->successful() || ! file_exists($sinkFile)) {
+            return [];
+        }
+
+        $data = json_decode((string) file_get_contents($sinkFile), true);
+
+        return is_array($data) ? $data : [];
     }
 
     /**
@@ -2202,9 +2305,10 @@ class SchedulesDirectService
 
         $request = Http::withHeaders($headers)
             ->timeout($timeout)
-            // Basic retry with 1 second delay. A failed response is returned (not thrown) so the
-            // SD error code in its body reaches the error handling below instead of being lost.
-            ->retry(2, 1000, throw: false)
+            // Basic retry with 1 second delay for timeouts and 5xx only: a 4xx carries an SD
+            // error code that repeating the request cannot change. A failed response is returned
+            // (not thrown) so that code reaches the error handling below instead of being lost.
+            ->retry(2, 1000, self::isTransientFailure(...), throw: false)
             ->withOptions([
                 'verify' => true,
                 'stream' => false, // Disable streaming to prevent memory issues
@@ -2266,7 +2370,7 @@ class SchedulesDirectService
             $headers = $this->buildHeaders($token);
             $request = Http::withHeaders($headers)
                 ->timeout($timeout)
-                ->retry(2, 1000, throw: false)
+                ->retry(2, 1000, self::isTransientFailure(...), throw: false)
                 ->withOptions([
                     'verify' => true,
                     'stream' => false,
@@ -2293,17 +2397,7 @@ class SchedulesDirectService
         // controlled retry. Checked before the generic failure branch because
         // Schedules Direct may return this on either an HTTP 4xx or a 200.
         if ($responseCode === self::TOKEN_EXPIRED_CODE) {
-            $this->forgetToken($token);
-            if ($this->currentEpg && $this->currentEpg->sd_token === $token) {
-                $this->currentEpg->forceFill(['sd_token' => null, 'sd_token_expires_at' => null])->syncOriginalAttributes(['sd_token', 'sd_token_expires_at']);
-            }
-
-            Log::warning('SchedulesDirect token expired (4006); cleared stored token', [
-                'endpoint' => $endpoint,
-                'epg_id' => $this->currentEpg?->id,
-            ]);
-
-            throw new SchedulesDirectTokenExpiredException('SchedulesDirect token expired (Code: 4006)');
+            $this->throwTokenExpired($token, is_array($body) ? $body : [], $endpoint);
         }
 
         // SD can report errors in an HTTP 200 body, so a non-zero code or a non-JSON body is a failure too
