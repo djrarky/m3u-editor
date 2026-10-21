@@ -913,7 +913,7 @@ it('keeps the existing guide when the token keeps being rejected after logging i
 
     expect(sdTokenRequestCount())->toBe(1);
     expect(Storage::disk('local')->get($epg->file_path))->toBe('<tv>previous guide</tv>');
-    expect(file_exists(Storage::disk('local')->path($epg->file_path).'.partial'))->toBeFalse();
+    expect(Storage::disk('local')->exists("{$epg->file_path}.download"))->toBeFalse();
 });
 
 it('fails the sync and keeps the existing guide when no listed programme can be fetched', function () {
@@ -973,4 +973,25 @@ it('measures the token lifetime on the Schedules Direct clock', function () {
 
     // Absolute tokenExpires would give now + 24h05m; the real lifetime is 24h.
     expect($epg->fresh()->sd_token_expires_at->timestamp)->toBe(now()->addDay()->subSeconds(60)->timestamp);
+});
+
+it('replaces a leftover from an interrupted sync and leaves only the guide file', function () {
+    Storage::fake('local');
+    Bus::fake();
+
+    $epg = sdEpg(['sd_token' => 'still-good', 'sd_token_expires_at' => now()->addHours(6)]);
+    Storage::disk('local')->put($epg->file_path, '<tv>previous guide</tv>');
+    Storage::disk('local')->put("{$epg->file_path}.download", '<tv><channel id="half-written"');
+
+    fakeLineupSyncEndpoints([
+        'json.schedulesdirect.org/20141201/schedules' => Http::response(sdScheduleWithProgramme()),
+        'json.schedulesdirect.org/20141201/programs' => fn (Request $request) => sdProgrammesFor($request),
+    ]);
+
+    (new SchedulesDirectService)->syncEpgData($epg);
+
+    expect(Storage::disk('local')->files($epg->folder_path))->toBe([$epg->file_path]);
+    expect(Storage::disk('local')->get($epg->file_path))
+        ->toContain('Synthetic EP0000000001')
+        ->not->toContain('half-written');
 });

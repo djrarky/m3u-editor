@@ -1771,20 +1771,24 @@ class SchedulesDirectService
         array $stationIds,
         array $dates
     ): string {
-        // Write to a partial file and swap it in only once it is complete, so a
-        // failed sync keeps serving the existing guide instead of a truncated one.
-        $filePath = Storage::disk('local')->path($epg->file_path);
-        $partialPath = $filePath.'.partial';
+        // Write next to the current guide file and only replace it once complete,
+        // like the URL import's download, so a failed sync keeps serving the last
+        // good guide. The name is fixed, so an interrupted sync leaves at most one
+        // leftover, which the next sync (or deleting the EPG) removes.
+        $disk = Storage::disk('local');
+        $filePath = $disk->path($epg->file_path);
+        $downloadPath = "{$epg->file_path}.download";
 
         // Ensure directory exists
-        if (! Storage::disk('local')->exists($epg->folder_path)) {
-            Storage::disk('local')->makeDirectory($epg->folder_path);
+        if (! $disk->exists($epg->folder_path)) {
+            $disk->makeDirectory($epg->folder_path);
         }
 
-        // Open file for writing
-        $file = fopen($partialPath, 'w');
+        // Drop a leftover from an interrupted sync, then open the file for writing
+        $disk->delete($downloadPath);
+        $file = fopen($disk->path($downloadPath), 'w');
         if (! $file) {
-            throw new Exception("Cannot open file for writing: {$partialPath}");
+            throw new Exception("Cannot open file for writing: {$disk->path($downloadPath)}");
         }
         $completed = false;
         try {
@@ -1811,13 +1815,14 @@ class SchedulesDirectService
             throw $e;
         } finally {
             fclose($file);
-            if (! $completed && file_exists($partialPath)) {
-                unlink($partialPath);
+            // Drop a sync that never became the guide file
+            if (! $completed) {
+                $disk->delete($downloadPath);
             }
             $epg->update(['sd_progress' => 100]);
         }
 
-        if (! rename($partialPath, $filePath)) {
+        if (! $disk->move($downloadPath, $epg->file_path)) {
             throw new Exception("Cannot replace the EPG file: {$filePath}");
         }
 
