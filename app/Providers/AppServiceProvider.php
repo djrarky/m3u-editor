@@ -630,6 +630,7 @@ class AppServiceProvider extends ServiceProvider
                 }
                 if ($epg->isDirty('sd_username')) {
                     $epg->sd_login_cooldown_until = null;
+                    $epg->sd_cooldown_reason = null;
                     $epg->sd_backoff_attempts = 0;
                 }
 

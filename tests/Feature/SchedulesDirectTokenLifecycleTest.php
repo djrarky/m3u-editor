@@ -122,7 +122,9 @@ it('is single-flight per account: a second authentication reuses the token anoth
     Http::assertSentCount(1);
 });
 
-it('enters a cooldown until the next UTC day on TOO_MANY_LOGINS (4009)', function () {
+it('enters a rolling 24 hour cooldown on TOO_MANY_LOGINS (4009)', function () {
+    $this->freezeTime();
+
     Http::fake([
         'json.schedulesdirect.org/20141201/token' => Http::response([
             'response' => 'TOO_MANY_LOGINS',
@@ -136,9 +138,9 @@ it('enters a cooldown until the next UTC day on TOO_MANY_LOGINS (4009)', functio
     expect(fn () => (new SchedulesDirectService)->authenticateFromEpg($epg))
         ->toThrow(SchedulesDirectRateLimitException::class);
 
-    $cooldown = $epg->fresh()->sd_login_cooldown_until;
-    expect($cooldown)->not->toBeNull();
-    expect($cooldown->timestamp)->toBe(now('UTC')->addDay()->startOfDay()->timestamp);
+    $fresh = $epg->fresh();
+    expect($fresh->sd_login_cooldown_until->timestamp)->toBe(now()->addHours(24)->timestamp);
+    expect($fresh->sd_cooldown_reason)->toBe(SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS);
 });
 
 it('suppresses /token requests while a 4009 cooldown is active without moving the window', function () {
@@ -562,7 +564,9 @@ it('clears the block on every EPG of the account when the user retries', functio
     expect($second->fresh()->isSchedulesDirectAuthBlocked())->toBeFalse();
 });
 
-it('enters a cooldown until the next UTC day on TOO_MANY_UNIQUE_IPS (4010)', function () {
+it('enters a rolling 24 hour cooldown on TOO_MANY_UNIQUE_IPS (4010)', function () {
+    $this->freezeTime();
+
     Http::fake([
         'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 4010, 'response' => 'TOO_MANY_UNIQUE_IPS', 'message' => 'Too many unique IPs.'], 400),
     ]);
@@ -576,7 +580,8 @@ it('enters a cooldown until the next UTC day on TOO_MANY_UNIQUE_IPS (4010)', fun
         expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS);
     }
 
-    expect($epg->fresh()->sd_login_cooldown_until->timestamp)->toBe(now('UTC')->addDay()->startOfDay()->timestamp);
+    expect($epg->fresh()->sd_login_cooldown_until->timestamp)->toBe(now()->addHours(24)->timestamp);
+    expect($epg->fresh()->sd_cooldown_reason)->toBe(SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS);
 });
 
 it('backs off exponentially up to 60 minutes on /token server errors', function () {
@@ -622,7 +627,7 @@ it('suppresses /token while a server-error backoff is active', function () {
         'json.schedulesdirect.org/20141201/token' => Http::response(['code' => 0, 'token' => 'x', 'tokenExpires' => now()->addDay()->timestamp]),
     ]);
 
-    $epg = sdEpg(['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_backoff_attempts' => 3]);
+    $epg = sdEpg(['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_BACKOFF, 'sd_backoff_attempts' => 3]);
 
     try {
         (new SchedulesDirectService)->authenticateFromEpg($epg);
@@ -743,7 +748,45 @@ it('names the active cooldown correctly on suppressed attempts', function (array
 
     Http::assertNothingSent();
 })->with([
-    'daily login limit' => [fn () => ['sd_login_cooldown_until' => now('UTC')->addDay()->startOfDay()->setTimezone(config('app.timezone'))], SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS],
-    'account lockout' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(10)], SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT],
-    'server backoff' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_backoff_attempts' => 3], SchedulesDirectRateLimitException::REASON_BACKOFF],
+    'login limit' => [fn () => ['sd_login_cooldown_until' => now()->addHours(20), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS], SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS],
+    'login limit in its last hour' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(30), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS], SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS],
+    'ip limit' => [fn () => ['sd_login_cooldown_until' => now()->addHours(20), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS], SchedulesDirectRateLimitException::REASON_TOO_MANY_UNIQUE_IPS],
+    'account lockout' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(10), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT], SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT],
+    'server backoff' => [fn () => ['sd_login_cooldown_until' => now()->addMinutes(4), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_BACKOFF, 'sd_backoff_attempts' => 3], SchedulesDirectRateLimitException::REASON_BACKOFF],
+    'cooldown recorded before reasons were stored' => [fn () => ['sd_login_cooldown_until' => now()->addHours(20)], SchedulesDirectRateLimitException::REASON_TOO_MANY_LOGINS],
 ]);
+
+it('reports the reason of the cooldown a sibling EPG on the account entered', function () {
+    Http::fake();
+
+    $userId = User::factory()->create()->id;
+    sdEpg(['user_id' => $userId, 'sd_login_cooldown_until' => now()->addMinutes(10), 'sd_cooldown_reason' => SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT]);
+    $stale = sdEpg(['user_id' => $userId]);
+
+    try {
+        (new SchedulesDirectService)->authenticateFromEpg($stale);
+        $this->fail('Expected a rate limit exception');
+    } catch (SchedulesDirectRateLimitException $e) {
+        expect($e->reason)->toBe(SchedulesDirectRateLimitException::REASON_ACCOUNT_LOCKOUT);
+    }
+
+    Http::assertNothingSent();
+});
+
+it('clears an expired token from every EPG that shares it on 4006', function () {
+    Http::fake([
+        'json.schedulesdirect.org/20141201/lineups/*' => Http::response(['code' => 4006, 'response' => 'TOKEN_EXPIRED', 'message' => 'Token has expired.'], 403),
+    ]);
+
+    $userId = User::factory()->create()->id;
+    $epg = sdEpg(['user_id' => $userId, 'sd_token' => 'shared-token', 'sd_token_expires_at' => now()->addHours(6)]);
+    $sibling = sdEpg(['user_id' => $userId, 'sd_token' => 'shared-token', 'sd_token_expires_at' => now()->addHours(6)]);
+
+    $service = (new SchedulesDirectService)->setCurrentEpg($epg);
+
+    expect(fn () => $service->getLineup('shared-token', 'USA-NY12345-X'))
+        ->toThrow(SchedulesDirectTokenExpiredException::class);
+
+    expect($epg->fresh()->sd_token)->toBeNull()
+        ->and($sibling->fresh()->sd_token)->toBeNull();
+});
