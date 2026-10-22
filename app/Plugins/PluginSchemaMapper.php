@@ -199,7 +199,7 @@ class PluginSchemaMapper
             ->dehydratedWhenHidden()
             ->visible(function (Get $get) use ($conditions, $provider, $field, $prefix, $plugin): bool {
                 foreach ($conditions as $dependency => $values) {
-                    if (! in_array($get($this->qualifiedDependencyName($dependency, $prefix)), Arr::wrap($values), true)) {
+                    if (! $this->visibilityValueAllowed($get($this->qualifiedDependencyName($dependency, $prefix)), Arr::wrap($values))) {
                         return false;
                     }
                 }
@@ -229,6 +229,16 @@ class PluginSchemaMapper
                     return false;
                 }
             });
+    }
+
+    /**
+     * Compare numbers by value so saved integers and submitted numeric strings match the same rule.
+     */
+    private function visibilityValueAllowed(mixed $value, array $allowed): bool
+    {
+        $normalize = fn (mixed $candidate): mixed => is_int($candidate) || is_float($candidate) ? (string) $candidate : $candidate;
+
+        return in_array($normalize($value), array_map($normalize, $allowed), true);
     }
 
     private function selectComponent(string $name, array $field, ?Plugin $plugin, string $prefix): Select

@@ -407,3 +407,24 @@ it('identifies the exact field or section in visibility validation errors', func
         'Plugin field settings.Advanced.api_key visibility_provider must be a non-empty string',
     ]);
 });
+
+it('rejects required fields that visibility rules or conditional sections can hide', function () {
+    $validator = app(PluginValidator::class);
+    $validate = fn (array $field): array => (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, $field, config('plugins.field_types'), 'settings');
+
+    expect($validate(['id' => 'api_key', 'type' => 'text', 'required' => true, 'visible_when' => ['mode' => ['api']]]))
+        ->toBe(['Plugin field settings.api_key cannot be required while visible_when or visibility_provider can hide it']);
+    expect($validate(['id' => 'api_key', 'type' => 'text', 'required' => true, 'visibility_provider' => 'fixture']))
+        ->toBe(['Plugin field settings.api_key cannot be required while visible_when or visibility_provider can hide it']);
+    expect($validate(['type' => 'section', 'label' => 'API', 'visible_when' => ['mode' => ['api']], 'fields' => [
+        ['type' => 'section', 'label' => 'Credentials', 'fields' => [
+            ['id' => 'api_key', 'type' => 'text', 'required' => true],
+        ]],
+    ]]))->toBe(['Plugin field settings.API.Credentials.api_key cannot be required while visible_when or visibility_provider can hide it']);
+
+    expect($validate(['type' => 'section', 'label' => 'API', 'fields' => [
+        ['id' => 'mode', 'type' => 'text', 'required' => true],
+        ['id' => 'api_key', 'type' => 'text', 'visible_when' => ['mode' => ['api']]],
+    ]]))->toBe([]);
+});

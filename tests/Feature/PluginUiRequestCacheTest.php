@@ -10,6 +10,7 @@ use App\Plugins\PluginUiRequestCache;
 use App\Plugins\PluginUiTableRegistry;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -40,7 +41,7 @@ it('renders table cells without decoding unrelated JSON columns', function () {
 
     expect($registry->columnDisplayState($plugin, $record, ['name' => 'name']))->toBe('Example');
     expect($registry->columnDisplayState($plugin, $record, ['name' => 'status', 'options' => ['ready' => 'Ready']]))->toBe('Ready');
-    expect($registry->columnDisplayState($plugin, $record, ['name' => 'created_at']))->toBe('2026-01-02T03:04:05.000000Z');
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'created_at']))->toBe(Carbon::parse('2026-01-02 03:04:05')->toJSON());
     expect($record::$jsonDecodes)->toBe(0);
 
     expect($registry->columnDisplayState($plugin, $record, ['name' => 'settings.source']))->toBe('native');

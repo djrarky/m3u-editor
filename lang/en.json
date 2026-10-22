@@ -4991,6 +4991,7 @@
     "Plugin disabled": "Plugin disabled",
     "Plugin discovery completed": "Plugin discovery completed",
     "Plugin enabled": "Plugin enabled",
+    "Plugin field :group cannot be required while visible_when or visibility_provider can hide it": "Plugin field :group cannot be required while visible_when or visibility_provider can hide it",
     "Plugin field :group visibility_depends_on requires a visibility_provider and a list of non-empty field names": "Plugin field :group visibility_depends_on requires a visibility_provider and a list of non-empty field names",
     "Plugin field :group visibility_provider must be a non-empty string": "Plugin field :group visibility_provider must be a non-empty string",
     "Plugin field :group visible_when must map field names to allowed values": "Plugin field :group visible_when must map field names to allowed values",

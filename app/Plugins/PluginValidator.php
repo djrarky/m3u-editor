@@ -539,13 +539,14 @@ class PluginValidator
         return $namespace !== '' ? $namespace.'\\'.$name : $name;
     }
 
-    private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
+    private function validateFieldDefinition(array $field, array $fieldTypes, string $group, bool $insideConditionalSection = false): array
     {
         $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
         // Sections may omit an ID, so use their label in diagnostic paths.
         $qualifiedGroup = $group.'.'.($fieldId ?? ($field['label'] ?? 'section'));
         $errors = $this->validateVisibilityDefinition($field, $qualifiedGroup);
+        $conditional = $insideConditionalSection || filled($field['visible_when'] ?? null) || filled($field['visibility_provider'] ?? null);
 
         if ($type === 'section') {
             if (blank($field['label'] ?? null)) {
@@ -567,7 +568,7 @@ class PluginValidator
 
                 $errors = [
                     ...$errors,
-                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup),
+                    ...$this->validateFieldDefinition($nestedField, $fieldTypes, $qualifiedGroup, $conditional),
                 ];
             }
 
@@ -576,6 +577,11 @@ class PluginValidator
 
         if (blank($fieldId)) {
             return ["{$group} field is missing [id]"];
+        }
+
+        // Hidden fields are still dehydrated and validated, so a required field that can be hidden would block saving.
+        if ($conditional && (bool) ($field['required'] ?? false)) {
+            $errors[] = __('Plugin field :group cannot be required while visible_when or visibility_provider can hide it', ['group' => $qualifiedGroup]);
         }
 
         if (! in_array($type, $fieldTypes, true)) {

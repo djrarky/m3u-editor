@@ -1218,3 +1218,25 @@ it('limits existing prefill lookups to current source rows and preserves configu
     expect((bool) $assigned->refresh()->enabled)->toBeTrue();
     expect($assigned->settings)->toBe(['run_sync' => false]);
 });
+
+it('matches numeric visibility values whether they were saved as integers or submitted as strings', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $plugin = declaredTableUiPlugin();
+    $schema = $plugin->schema_definition;
+    array_push($schema['ui_tables'][0]['fields'],
+        ['id' => 'settings.tier', 'label' => 'Tier', 'type' => 'select', 'options' => ['1' => 'Basic', '2' => 'Advanced']],
+        ['id' => 'settings.advanced_note', 'label' => 'Advanced note', 'type' => 'text', 'visible_when' => ['settings.tier' => ['2']]],
+        ['id' => 'settings.basic_note', 'label' => 'Basic note', 'type' => 'text', 'visible_when' => ['settings.tier' => [1]]],
+    );
+    $plugin->update(['schema_definition' => $schema]);
+    $profile = app(PluginUiTableRegistry::class)->newModel($plugin, $schema['tables'][0]['name'])->newQuery()->firstOrFail();
+    $profile->update(['settings' => ['source_mode' => 'native_playlist', 'tier' => 2]]);
+
+    Livewire::test(PluginTableInline::class, ['record' => $plugin, 'tableId' => 'profiles'])
+        ->mountTableAction('edit', $profile)
+        ->assertFormFieldIsVisible('settings.advanced_note')
+        ->assertFormFieldIsHidden('settings.basic_note')
+        ->set('mountedActions.0.data.settings.tier', '1')
+        ->assertFormFieldIsHidden('settings.advanced_note')
+        ->assertFormFieldIsVisible('settings.basic_note');
+});

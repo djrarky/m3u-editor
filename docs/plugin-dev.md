@@ -643,7 +643,8 @@ Common field keys:
 ### Conditional fields and sections
 
 `visible_when` maps another field's name to a list of allowed values. All conditions
-must match, using strict value comparisons. For example:
+must match. Numbers compare by value, so `2` and `"2"` are equivalent; other values,
+including booleans and `null`, must match exactly. For example:
 
 ```json
 {
@@ -658,9 +659,12 @@ must match, using strict value comparisons. For example:
 
 Names follow the same prefix rules as `depends_on`. The host makes controlling
 fields reactive. Visibility changes retain saved and unsaved values; they do not
-reset fields, disable settings, or change validation rules. Use optional fields or
-valid defaults for inactive settings. Existing `depends_on` option resets still
-apply independently.
+reset fields, disable settings, or change validation rules. Hidden fields are still
+validated, so a field that can be hidden (it declares `visible_when` or
+`visibility_provider`, or sits inside a section that does) cannot set `required`;
+manifest validation rejects that combination. Use optional fields or valid defaults
+for inactive settings, and check required values in plugin code. Existing
+`depends_on` option resets still apply independently.
 
 For conditions requiring plugin logic, declare `visibility_provider` and a
 `visibility_depends_on` list. The plugin may implement this optional method:
