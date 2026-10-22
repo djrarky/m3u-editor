@@ -109,6 +109,8 @@ it('reports container services by process and expected placement', function () {
     config()->set('proxy.external_proxy_enabled', true);
     config()->set('database.redis.default.host', 'redis');
     config()->set('session.driver', 'redis');
+    // Pinned so the result does not depend on the suite's DB (CI runs on a local Postgres).
+    config()->set('database.connections.'.config('database.default').'.driver', 'sqlite');
 
     $services = invade(systemHealthServiceWithProcesses([
         '/usr/bin/python3 /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf',
