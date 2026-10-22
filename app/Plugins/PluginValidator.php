@@ -541,7 +541,7 @@ class PluginValidator
 
     private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
     {
-        $errors = [];
+        $errors = $this->validateVisibilityDefinition($field, $group);
         $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
 
@@ -604,6 +604,36 @@ class PluginValidator
 
         if ($type === 'table_select' && blank($field['table'] ?? null)) {
             $errors[] = "{$group}.{$fieldId} table_select fields require [table]";
+        }
+
+        return $errors;
+    }
+
+    private function validateVisibilityDefinition(array $field, string $group): array
+    {
+        $errors = [];
+        if (array_key_exists('visible_when', $field)) {
+            if (! is_array($field['visible_when']) || array_is_list($field['visible_when'])) {
+                $errors[] = __('Plugin field :group visible_when must map field names to allowed values', ['group' => $group]);
+            } else {
+                foreach ($field['visible_when'] as $dependency => $values) {
+                    if (! is_string($dependency) || blank($dependency) || ! is_array($values) || ! array_is_list($values) || $values === []
+                        || collect($values)->contains(fn (mixed $value): bool => ! is_scalar($value) && $value !== null)) {
+                        $errors[] = __('Plugin field :group visible_when requires non-empty field names and lists of scalar or null values', ['group' => $group]);
+                    }
+                }
+            }
+        }
+
+        if (array_key_exists('visibility_provider', $field) && (! is_string($field['visibility_provider']) || blank($field['visibility_provider']))) {
+            $errors[] = __('Plugin field :group visibility_provider must be a non-empty string', ['group' => $group]);
+        }
+
+        if (array_key_exists('visibility_depends_on', $field)) {
+            if (blank($field['visibility_provider'] ?? null) || ! is_array($field['visibility_depends_on']) || ! array_is_list($field['visibility_depends_on'])
+                || collect($field['visibility_depends_on'])->contains(fn (mixed $value): bool => ! is_string($value) || blank($value))) {
+                $errors[] = __('Plugin field :group visibility_depends_on requires a visibility_provider and a list of non-empty field names', ['group' => $group]);
+            }
         }
 
         return $errors;

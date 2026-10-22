@@ -9,11 +9,13 @@ use App\Models\Plugin;
 use App\Models\PluginRun;
 use App\Models\User;
 use App\Plugins\PluginIntegrityService;
+use App\Plugins\PluginManager;
 use App\Plugins\PluginSchemaManager;
 use App\Plugins\PluginSchemaMapper;
 use App\Plugins\PluginUiTableRegistry;
 use App\Plugins\PluginValidator;
 use App\Plugins\Support\PluginManifest;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
@@ -191,6 +193,14 @@ class Plugin implements PluginInterface, PluginSelectOptionsProviderInterface
         return [
             'viewersvault' => 'ViewersVault '.\$context->value('settings.provider', 'unknown').'/'.\$context->value('settings.country', 'unknown'),
         ];
+    }
+
+    public function isFieldVisible(string \$provider, PluginSelectOptionsContext \$context): bool
+    {
+        return \\Illuminate\\Support\\Facades\\DB::table('{$tableName}')
+            ->where('extension_plugin_id', \$context->plugin->id)
+            ->where('name', 'Visible')
+            ->exists();
     }
 }
 PHP;
@@ -1069,4 +1079,105 @@ it('caps prefill inserts at the prefill_max_source_rows config limit', function 
     app(PluginUiTableRegistry::class)->prefillRows($plugin, $tableDefinition);
 
     expect(DB::table($linksTable)->count())->toBe($cap);
+});
+
+it('reuses UI validation within one request while execution still verifies changed files', function () {
+    [$plugin, $sourcePath] = declaredDynamicOptionsTableUiPlugin();
+    $integrity = new class extends PluginIntegrityService
+    {
+        public int $scans = 0;
+
+        public function hashesForPlugin(string $pluginPath, ?string $entrypoint = null): array
+        {
+            $this->scans++;
+
+            return parent::hashesForPlugin($pluginPath, $entrypoint);
+        }
+    };
+    app()->instance(PluginIntegrityService::class, $integrity);
+
+    try {
+        $state = ['settings' => ['country' => 'uk', 'provider' => 'sky']];
+        for ($i = 0; $i < 4; $i++) {
+            expect(app(PluginManager::class)->selectOptions($plugin, 'fixture_sources', $state))
+                ->toBe(['viewersvault' => 'ViewersVault sky/uk']);
+        }
+        expect($integrity->scans)->toBe(1);
+        expect(app(PluginManager::class)->selectOptions($plugin, 'fixture_sources', ['settings' => ['country' => 'ie']]))
+            ->toBe(['viewersvault' => 'ViewersVault unknown/ie']);
+        expect($integrity->scans)->toBe(1);
+        app()->instance('request', Request::create('/next'));
+        app(PluginManager::class)->selectOptions($plugin, 'fixture_sources', $state);
+        expect($integrity->scans)->toBe(2);
+        File::append("{$sourcePath}/Plugin.php", "\n// Changed after the UI was rendered.\n");
+        expect(fn () => app(PluginManager::class)->instantiate($plugin->fresh()))->toThrow(RuntimeException::class);
+        expect($integrity->scans)->toBe(3);
+        expect($plugin->fresh()->hasVerifiedIntegrity())->toBeFalse();
+    } finally {
+        File::deleteDirectory($sourcePath);
+    }
+});
+
+it('does not reuse UI results after the plugin is blocked or uninstalled', function (array $changes) {
+    [$plugin, $sourcePath] = declaredDynamicOptionsTableUiPlugin();
+    try {
+        app(PluginManager::class)->selectOptions($plugin, 'fixture_sources');
+        $plugin->fresh()->update($changes);
+        expect(fn () => app(PluginManager::class)->selectOptions($plugin, 'fixture_sources'))
+            ->toThrow(RuntimeException::class);
+        foreach ($changes as $key => $value) {
+            expect($plugin->fresh()->getAttribute($key))->toBe($value);
+        }
+    } finally {
+        File::deleteDirectory($sourcePath);
+    }
+})->with([
+    'blocked' => [['trust_state' => 'blocked', 'enabled' => false]],
+    'uninstalled' => [['installation_status' => 'uninstalled', 'enabled' => false]],
+]);
+
+it('refreshes provider visibility after plugin table edits and deletes', function () {
+    [$plugin, $sourcePath] = declaredDynamicOptionsTableUiPlugin();
+    try {
+        $manager = app(PluginManager::class);
+        $table = data_get($plugin->schema_definition, 'tables.0.name');
+        $record = app(PluginUiTableRegistry::class)->newModel($plugin, $table)->newQuery()->firstOrFail();
+        expect($manager->fieldVisible($plugin, 'fixture_visibility'))->toBeFalse();
+        $record->update(['name' => 'Visible']);
+        expect($manager->fieldVisible($plugin, 'fixture_visibility'))->toBeTrue();
+        $record->delete();
+        expect($manager->fieldVisible($plugin, 'fixture_visibility'))->toBeFalse();
+    } finally {
+        File::deleteDirectory($sourcePath);
+    }
+});
+
+it('limits existing prefill lookups to current source rows and preserves configured assignments', function () {
+    $user = User::factory()->admin()->create();
+    $otherUser = User::factory()->create();
+    $this->actingAs($user);
+    [$mine, $other] = Playlist::withoutEvents(fn (): array => [
+        Playlist::factory()->for($user)->create(),
+        Playlist::factory()->for($otherUser)->create(),
+    ]);
+    [$plugin, , $linksTable] = declaredPrefilledTableUiPlugin();
+    $registry = app(PluginUiTableRegistry::class);
+    $definition = $registry->tableFor($plugin, 'playlist_assignments');
+    $registry->newModel($plugin, $linksTable)->newQuery()->create([
+        'extension_plugin_id' => $plugin->id, 'playlist_id' => $other->id, 'user_id' => $otherUser->id,
+    ]);
+    $assigned = $registry->newModel($plugin, $linksTable)->newQuery()->create([
+        'extension_plugin_id' => $plugin->id, 'playlist_id' => $mine->id, 'user_id' => $user->id,
+        'enabled' => true, 'settings' => ['run_sync' => false],
+    ]);
+    DB::enableQueryLog();
+    DB::flushQueryLog();
+    $registry->prefillRows($plugin, $definition);
+    $lookup = collect(DB::getQueryLog())->first(fn (array $query): bool => str_starts_with($query['query'], 'select "playlist_id" from "'.$linksTable.'"'));
+    expect($lookup)->not->toBeNull();
+    expect($lookup['query'])->toContain('"playlist_id" in (?)');
+    expect($lookup['bindings'])->toBe([$plugin->id, $mine->id]);
+    expect(DB::table($linksTable)->count())->toBe(2);
+    expect((bool) $assigned->refresh()->enabled)->toBeTrue();
+    expect($assigned->settings)->toBe(['run_sync' => false]);
 });
