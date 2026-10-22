@@ -68,8 +68,10 @@ it('reads table columns once per request and refreshes after schema changes', fu
     DB::enableQueryLog();
     DB::flushQueryLog();
     expect(app(PluginUiRequestCache::class)->hasColumn('plugin_cache_columns', 'id'))->toBeTrue();
+    $queries = DB::getQueryLog();
+    expect($queries)->not->toBeEmpty();
     expect(app(PluginUiRequestCache::class)->hasColumn('plugin_cache_columns', 'name'))->toBeFalse();
-    expect(collect(DB::getQueryLog())->filter(fn (array $query): bool => str_contains($query['query'], 'pragma_table_xinfo')))->toHaveCount(1);
+    expect(DB::getQueryLog())->toBe($queries);
     $schema['tables'][0]['columns'][] = ['type' => 'string', 'name' => 'name', 'nullable' => true];
     $manager->apply($schema);
     expect(app(PluginUiRequestCache::class)->hasColumn('plugin_cache_columns', 'name'))->toBeTrue();
@@ -121,7 +123,7 @@ it('queries repeated host-table labels and table existence only once including m
 
     $queries = collect(DB::getQueryLog());
     expect($queries->filter(fn (array $query): bool => str_contains($query['query'], 'from "playlists"')))->toHaveCount(2);
-    expect($queries->filter(fn (array $query): bool => str_contains($query['query'], 'sqlite_master')))->toHaveCount(1);
+    expect($queries)->toHaveCount(3);
 
     DB::table('playlists')->where('id', $playlist->id)->update(['name' => 'Renamed playlist']);
     app()->instance('request', Request::create('/next'));
