@@ -15,6 +15,46 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Schema;
 
+it('renders table cells without decoding unrelated JSON columns', function () {
+    $record = new class extends PluginTableRecord
+    {
+        public static int $jsonDecodes = 0;
+
+        public function fromJson($value, $asObject = false): mixed
+        {
+            self::$jsonDecodes++;
+
+            return parent::fromJson($value, $asObject);
+        }
+    };
+    $record->mergeCasts(['settings' => 'array', 'details' => 'array']);
+    $record->setRawAttributes([
+        'name' => 'Example',
+        'status' => 'ready',
+        'settings' => '{"source":"native"}',
+        'details' => '{"diagnostics":["unrelated report data"]}',
+        'created_at' => '2026-01-02 03:04:05',
+    ]);
+    $registry = app(PluginUiTableRegistry::class);
+    $plugin = new Plugin;
+
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'name']))->toBe('Example');
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'status', 'options' => ['ready' => 'Ready']]))->toBe('Ready');
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'created_at']))->toBe('2026-01-02T03:04:05.000000Z');
+    expect($record::$jsonDecodes)->toBe(0);
+
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'settings.source']))->toBe('native');
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'settings']))->toBe('{"source":"native"}');
+    expect($record::$jsonDecodes)->toBe(2);
+    expect($record->getVisible())->toBe([]);
+
+    $record->setVisible(['name']);
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'status']))->toBeNull();
+    $record->makeHidden('name');
+    expect($registry->columnDisplayState($plugin, $record, ['name' => 'name']))->toBeNull();
+    expect($record->getVisible())->toBe(['name']);
+});
+
 it('shares equivalent owned model lookups without sharing another users options', function () {
     Bus::fake();
     $owner = User::factory()->create();

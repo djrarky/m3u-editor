@@ -192,14 +192,24 @@ class PluginUiTableRegistry
 
     public function columnDisplayState(Plugin $plugin, PluginTableRecord $record, array $column): mixed
     {
-        $state = $record->toArray();
+        $valuePath = (string) ($column['lookup']['source_column'] ?? $column['name']);
+        $attributes = array_map(
+            fn (string $path): string => Str::before($path, '.'),
+            [$valuePath, ...$this->dependsOn($column)],
+        );
+        if ($record->getVisible() !== []) {
+            $attributes = array_intersect($attributes, $record->getVisible());
+        }
+
+        // Keep Eloquent's date/enum serialization without decoding unrelated JSON payloads.
+        $state = $attributes === [] ? [] : (clone $record)->setVisible($attributes)->toArray();
         if (! empty($column['lookup']) && is_array($column['lookup'])) {
-            $value = data_get($state, (string) ($column['lookup']['source_column'] ?? $column['name']));
+            $value = data_get($state, $valuePath);
 
             return $this->lookupLabel($plugin, $column['lookup'], $value);
         }
 
-        $value = data_get($state, (string) $column['name']);
+        $value = data_get($state, $valuePath);
 
         if (is_scalar($value)) {
             $options = $this->columnOptions($plugin, $column, $state);

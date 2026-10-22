@@ -393,3 +393,17 @@ it('accepts visibility declarations on nested sections and makes controlling fie
     expect($components[0]->isLive())->toBeTrue();
     expect($components[1]->isDehydratedWhenHidden())->toBeTrue();
 });
+
+it('identifies the exact field or section in visibility validation errors', function () {
+    $field = ['type' => 'section', 'label' => 'Advanced', 'visibility_provider' => '', 'fields' => [
+        ['id' => 'api_key', 'type' => 'text', 'visibility_provider' => ''],
+    ]];
+    $validator = app(PluginValidator::class);
+    $errors = (new ReflectionMethod($validator, 'validateFieldDefinition'))
+        ->invoke($validator, $field, config('plugins.field_types'), 'settings');
+
+    expect($errors)->toBe([
+        'Plugin field settings.Advanced visibility_provider must be a non-empty string',
+        'Plugin field settings.Advanced.api_key visibility_provider must be a non-empty string',
+    ]);
+});

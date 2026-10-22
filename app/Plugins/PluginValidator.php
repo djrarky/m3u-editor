@@ -541,16 +541,13 @@ class PluginValidator
 
     private function validateFieldDefinition(array $field, array $fieldTypes, string $group): array
     {
-        $errors = $this->validateVisibilityDefinition($field, $group);
         $type = $field['type'] ?? 'text';
         $fieldId = $field['id'] ?? null;
+        // Sections may omit an ID, so use their label in diagnostic paths.
+        $qualifiedGroup = $group.'.'.($fieldId ?? ($field['label'] ?? 'section'));
+        $errors = $this->validateVisibilityDefinition($field, $qualifiedGroup);
 
         if ($type === 'section') {
-            // Sections do not require an [id]; fall back to the label for readable error paths.
-            // Nested sections (sections within sections) are supported via recursive validation.
-            $qualifier = $fieldId ?? ($field['label'] ?? 'section');
-            $qualifiedGroup = "{$group}.{$qualifier}";
-
             if (blank($field['label'] ?? null)) {
                 $errors[] = "{$qualifiedGroup} section fields require [label]";
             }

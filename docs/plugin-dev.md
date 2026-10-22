@@ -688,7 +688,9 @@ trust is checked before each provider access. Execution, trust and explicit
 validation still verify files afresh. Equivalent model/table option queries,
 individual label lookups (including missing labels), and table existence/column
 metadata are shared within the request. Labels are resolved independently of
-dropdown limits. Plugin table writes clear option, label and visibility results.
+dropdown limits. Table cells serialize only their displayed attribute and declared
+provider dependencies, retaining Eloquent's date and enum formatting without
+decoding unrelated JSON columns. Plugin table writes clear option, label and visibility results.
 Schema apply/purge also clears these results and table metadata, including when
 a schema change fails partway through.
 

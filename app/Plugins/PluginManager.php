@@ -831,13 +831,19 @@ class PluginManager
 
     private function validatedUiPlugin(Plugin $plugin): Plugin
     {
+        // Recheck registry state even on cache hits so blocking or uninstalling takes effect immediately.
         $plugin = $plugin->fresh() ?? throw new RuntimeException(__('Plugin is no longer available.'));
         $cache = app(PluginUiRequestCache::class);
         $key = [spl_object_id($plugin->getConnection()), $plugin->getKey(), $plugin->getAttributes()];
         $validated = $cache->remember('validation', $key, function () use ($plugin, $cache): Plugin {
             $validated = $this->validate($plugin);
 
-            return $cache->remember('validation', [spl_object_id($validated->getConnection()), $validated->getKey(), $validated->getAttributes()], fn (): Plugin => $validated);
+            // Validation updates registry metadata; reuse the result under both before and after keys.
+            return $cache->remember('validation', [
+                spl_object_id($validated->getConnection()),
+                $validated->getKey(),
+                $validated->getAttributes(),
+            ], fn (): Plugin => $validated);
         });
         $this->assertPluginLoadable($validated, requireEnabled: false);
         $this->assertPluginTrustedForUi($validated);
@@ -847,7 +853,15 @@ class PluginManager
 
     private function uiProviderKey(Plugin $plugin, string $provider, array $state, array $field): array
     {
-        return [spl_object_id($plugin->getConnection()), $plugin->getKey(), $plugin->getAttributes(), auth()->user()?->getAttributes(), $provider, $state, $field];
+        return [
+            spl_object_id($plugin->getConnection()),
+            $plugin->getKey(),
+            $plugin->getAttributes(),
+            auth()->user()?->getAttributes(),
+            $provider,
+            $state,
+            $field,
+        ];
     }
 
     private function uiProviderContext(Plugin $plugin, array $state, array $field): PluginSelectOptionsContext

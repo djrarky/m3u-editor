@@ -568,6 +568,43 @@ it('renders plugin-declared table column options from a dynamic provider', funct
     }
 });
 
+it('preserves edited values when conditional fields and sections are hidden before saving', function () {
+    $this->actingAs(User::factory()->admin()->create());
+    $plugin = declaredTableUiPlugin();
+    $schema = $plugin->schema_definition;
+    $schema['ui_tables'][0]['fields'][] = [
+        'id' => 'settings.note', 'label' => 'Note', 'type' => 'text',
+        'visible_when' => ['enabled' => [true]],
+    ];
+    $schema['ui_tables'][0]['fields'][] = [
+        'type' => 'section', 'label' => 'Advanced values',
+        'visible_when' => ['enabled' => [true]],
+        'fields' => [['id' => 'settings.nested_note', 'label' => 'Nested note', 'type' => 'text']],
+    ];
+    $plugin->update(['schema_definition' => $schema]);
+    $profile = app(PluginUiTableRegistry::class)->newModel($plugin, $schema['tables'][0]['name'])->newQuery()->firstOrFail();
+    $profile->update(['settings' => [
+        'source_mode' => 'native_playlist', 'note' => 'Saved', 'nested_note' => 'Saved nested',
+    ]]);
+
+    $component = Livewire::test(PluginTableInline::class, ['record' => $plugin, 'tableId' => 'profiles'])
+        ->mountTableAction('edit', $profile)
+        ->assertFormFieldIsVisible('settings.note')
+        ->set('mountedActions.0.data.settings.note', 'Edited')
+        ->set('mountedActions.0.data.settings.nested_note', 'Edited nested')
+        ->set('mountedActions.0.data.enabled', false)
+        ->assertFormFieldIsHidden('settings.note');
+
+    $instance = $component->instance();
+    expect($instance->getSchema($instance->getMountedActionSchemaName())->toHtml())->not->toContain('Advanced values');
+    $component->callMountedTableAction()->assertHasNoTableActionErrors();
+
+    expect($profile->refresh()->settings)->toBe([
+        'source_mode' => 'native_playlist', 'note' => 'Edited', 'nested_note' => 'Edited nested',
+    ]);
+    expect((bool) $profile->enabled)->toBeFalse();
+});
+
 it('applies declared cascade actions to plugin table foreign keys', function () {
     $plugin = declaredTableUiPlugin();
     $tableName = 'plugin_declared_table_ui_profiles';
