@@ -60,7 +60,11 @@ it('creates one in-app alert and forwards it to configured alert channels', func
     $alertService = Mockery::mock(AlertService::class);
     $alertService->shouldReceive('send')
         ->once()
-        ->with(Mockery::on(fn (string $message): bool => str_contains($message, $playlist->name)));
+        ->with(
+            Mockery::on(fn (string $message): bool => str_contains($message, $playlist->name)),
+            $user->email,
+            'Subscription expiring soon',
+        );
     app()->instance(AlertService::class, $alertService);
 
     $this->artisan('app:check-subscription-expirations')->assertSuccessful();
@@ -115,7 +119,11 @@ it('checks enabled provider profiles when playlist pooling is enabled', function
     $alertService = Mockery::mock(AlertService::class);
     $alertService->shouldReceive('send')
         ->once()
-        ->with(Mockery::on(fn (string $message): bool => str_contains($message, $profile->name)));
+        ->with(
+            Mockery::on(fn (string $message): bool => str_contains($message, $profile->name)),
+            $user->email,
+            'Subscription expiring soon',
+        );
     app()->instance(AlertService::class, $alertService);
 
     $this->artisan('app:check-subscription-expirations')->assertSuccessful();
@@ -144,7 +152,11 @@ it('sends a separate alert after the subscription has expired', function () {
     $alertService = Mockery::mock(AlertService::class);
     $alertService->shouldReceive('send')
         ->once()
-        ->with(Mockery::on(fn (string $message): bool => str_contains($message, 'Subscription expired')));
+        ->with(
+            Mockery::on(fn (string $message): bool => str_contains($message, 'Subscription expired')),
+            $user->email,
+            'Subscription expired',
+        );
     app()->instance(AlertService::class, $alertService);
 
     $this->artisan('app:check-subscription-expirations')->assertSuccessful();

@@ -140,7 +140,11 @@ class CheckSubscriptionExpirations extends Command
         }
 
         try {
-            $this->alertService->send('['.$title.'] '.$body);
+            $this->alertService->send(
+                message: '['.$title.'] '.$body,
+                email: $owner->email,
+                subject: $title,
+            );
         } catch (Throwable $exception) {
             Log::warning('Unable to forward subscription expiry notification', [
                 'subscription' => $displayName,

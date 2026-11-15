@@ -325,7 +325,7 @@ HTML))
                                             ->helperText(__('Sends an alert when a playlist sync is canceled because it would have removed more channels, groups or series than the invalidation threshold allows.')),
                                         Toggle::make('alerts_on_subscription_expiring')
                                             ->label(__('Notify on expiring subscriptions'))
-                                            ->helperText(__('Creates an in-app notification and forwards it to enabled alert channels when an Xtream subscription is close to expiring.'))
+                                            ->helperText(__('Creates an in-app notification, emails the playlist owner when SMTP is configured, and forwards it to enabled alert channels when an Xtream subscription is close to expiring.'))
                                             ->live(),
                                         TextInput::make('subscription_expiry_warning_days')
                                             ->label(__('Subscription expiry warning'))
